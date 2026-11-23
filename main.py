@@ -28,7 +28,7 @@ def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
 
-# Hard reject in TITLE
+
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -74,7 +74,6 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# TIER1: exact target roles. Must appear in TITLE or first 400 chars of body.
 TIER1 = [
     "kyc", "know your customer", "compliance", "aml",
     "anti money laundering", "anti-money laundering",
@@ -140,12 +139,13 @@ def fetch_arbeitnow():
 
 
 def fetch_bundesagentur():
-    """Debug version: prints response codes and snippets."""
     headers = {"X-API-Key": "jobboerse-jobsuche"}
     queries = ["KYC Compliance", "Prozessmanager", "Data Steward",
                "Regulatory Reporting", "Geldwäsche"]
     jobs = []
     seen = set()
+    dumped = False
+
     for q in queries:
         params = {"was": q, "size": 40, "page": 1, "veroeffentlichtseit": 14}
         try:
@@ -153,32 +153,62 @@ def fetch_bundesagentur():
                 "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs",
                 headers=headers, params=params, timeout=30,
             )
-            print(f"  BA query '{q}': HTTP {r.status_code}, {len(r.content)} bytes")
             if r.status_code != 200:
-                print(f"    response: {r.text[:200]}")
+                print(f"  BA '{q}': HTTP {r.status_code}, skipped")
                 continue
+
             data = r.json()
-            keys = list(data.keys())
-            print(f"    top-level keys: {keys}")
-            results = data.get("ergebnisse") or data.get("ergebnisliste") or []
-            print(f"    results: {len(results)}")
+            results = data.get("ergebnisliste") or data.get("ergebnisse") or []
+            print(f"  BA '{q}': {len(results)} results")
+
             for j in results:
-                t = j.get("titel") or j.get("beruf", "")
-                if t and t not in seen:
-                    seen.add(t)
-                    loc = ""
-                    if isinstance(j.get("arbeitsort"), dict):
-                        loc = j["arbeitsort"].get("ort", "")
-                    jobs.append({
-                        "title": t,
-                        "company": j.get("arbeitgeber", ""),
-                        "location": loc or "Germany",
-                        "description": j.get("beschreibung") or "",
-                        "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('refnr','')}",
-                        "source": "bundesagentur",
-                    })
+                if not isinstance(j, dict):
+                    continue
+
+                if not dumped:
+                    print(f"    FIRST JOB keys: {list(j.keys())}")
+                    print(f"    FIRST JOB sample: {str(j)[:400]}")
+                    dumped = True
+
+                t = (
+                    j.get("titel")
+                    or j.get("beruf")
+                    or j.get("stellenangebotsTitel")
+                    or j.get("berufsbezeichnung")
+                    or j.get("hauptberuf")
+                    or ""
+                )
+                if not isinstance(t, str):
+                    t = ""
+                t = t.strip()
+
+                if not t or t in seen:
+                    continue
+                seen.add(t)
+
+                loc = ""
+                ao = j.get("arbeitsort")
+                if isinstance(ao, dict):
+                    loc = ao.get("ort", "") or ""
+                elif isinstance(ao, str):
+                    loc = ao
+
+                desc = j.get("beschreibung") or ""
+                if not isinstance(desc, str):
+                    desc = ""
+
+                jobs.append({
+                    "title": t,
+                    "company": j.get("arbeitgeber", "") or "",
+                    "location": loc or "Germany",
+                    "description": desc,
+                    "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('refnr','')}",
+                    "source": "bundesagentur",
+                })
+
         except Exception as e:
             print(f"  BA '{q}' exception: {e}")
+
     return jobs
 
 
@@ -283,7 +313,7 @@ def score_gemini(job):
 def rank_and_filter(jobs):
     out = []
     seen = set()
-    stats = {"title": 0, "body": 0, "no_tier1_in_title": 0, "kept": 0}
+    stats = {"title": 0, "body": 0, "no_tier1": 0, "kept": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -293,7 +323,7 @@ def rank_and_filter(jobs):
 
         tl = title.lower()
         bl = job["description"].lower()
-        body_head = bl[:400]  # Only first 400 chars count for TIER1
+        body_head = bl[:400]
 
         if HARD_REJECT_TITLE_RE.search(tl):
             stats["title"] += 1
@@ -302,11 +332,10 @@ def rank_and_filter(jobs):
             stats["body"] += 1
             continue
 
-        # TIER1 must be in TITLE or in first 400 chars of body
         t1_title = sum(1 for p in TIER1 if p in tl)
         t1_head = sum(1 for p in TIER1 if p in body_head)
         if t1_title == 0 and t1_head == 0:
-            stats["no_tier1_in_title"] += 1
+            stats["no_tier1"] += 1
             continue
 
         t2 = sum(1 for p in TIER2 if p in (tl + " " + body_head))
@@ -317,7 +346,7 @@ def rank_and_filter(jobs):
     out.sort(key=lambda x: x[0], reverse=True)
     print(f"Rejected (title): {stats['title']}")
     print(f"Rejected (body): {stats['body']}")
-    print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1_in_title']}")
+    print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1']}")
     print(f"Surviving: {stats['kept']}")
     return [x[1] for x in out]
 
@@ -339,7 +368,7 @@ def main():
     arbeitnow_raw = fetch_arbeitnow()
     print(f"Arbeitnow raw: {len(arbeitnow_raw)}")
 
-    print("\n=== Bundesagentur debug ===")
+    print("\n=== Bundesagentur ===")
     ba_raw = fetch_bundesagentur()
     print(f"Bundesagentur raw: {len(ba_raw)}\n")
 
@@ -353,8 +382,7 @@ def main():
     print(f"\nWill score: {len(candidates)}\n")
 
     if len(candidates) < 3:
-        print("WARNING: fewer than 3 candidates. This means TIER1 supply is low.")
-        print("Check the Bundesagentur debug output above.")
+        print("WARNING: fewer than 3 candidates. Check the Bundesagentur debug output above.")
 
     matches = []
     for i, job in enumerate(candidates, 1):
