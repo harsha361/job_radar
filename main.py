@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import requests
 from google import genai
 from groq import Groq
@@ -12,7 +13,6 @@ GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
 
 # ============ FILTER TIERS ============
-
 HARD_REJECT_TITLE = [
     "werkstudent", "working student", "praktikant", "praktikum",
     "ausbildung", "auszubildende", "azubi", "duales studium",
@@ -147,10 +147,8 @@ JOBS:
 
 
 def _parse_scores(text, expected_count):
-    """Try JSON parse first, fall back to regex."""
     if not text:
         return None
-    # Try to find JSON array
     m = re.search(r"\[[\d,\s]+\]", text)
     if m:
         try:
@@ -160,9 +158,7 @@ def _parse_scores(text, expected_count):
                 return nums[:expected_count]
         except Exception:
             pass
-    # Fallback: any 1-3 digit numbers
     nums = [int(n) for n in re.findall(r"\b(\d{1,3})\b", text)]
-    # Filter out obviously wrong values (years, job numbers, etc.)
     nums = [n for n in nums if 0 <= n <= 100]
     if len(nums) >= expected_count:
         return nums[:expected_count]
@@ -170,43 +166,58 @@ def _parse_scores(text, expected_count):
 
 
 def score_batch_groq(jobs_batch):
+    """Groq primary with openai/gpt-oss-20b. Retries once on transient errors."""
     if not groq_client:
         return None
-    try:
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": _build_prompt(jobs_batch)}],
-            temperature=0.1,
-        )
-        text = response.choices[0].message.content.strip()
-        return _parse_scores(text, len(jobs_batch))
-    except Exception as e:
-        print(f"Groq batch error: {e}")
-        return None
+    for attempt in range(2):
+        try:
+            response = groq_client.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=[{"role": "user", "content": _build_prompt(jobs_batch)}],
+                temperature=0.1,
+                max_completion_tokens=512,
+            )
+            text = response.choices[0].message.content.strip()
+            scores = _parse_scores(text, len(jobs_batch))
+            if scores:
+                return scores
+            print(f"  Groq returned unparseable output on attempt {attempt+1}")
+        except Exception as e:
+            print(f"  Groq error on attempt {attempt+1}: {e}")
+            time.sleep(2 ** attempt)
+    return None
 
 
 def score_batch_gemini(jobs_batch):
-    try:
-        response = gemini_client.models.generate_content(
-            model="gemini-3.8-flash",
-            contents=_build_prompt(jobs_batch),
-        )
-        return _parse_scores(response.text, len(jobs_batch))
-    except Exception as e:
-        print(f"Gemini batch error: {e}")
-        return None
+    """Gemini fallback chain: 3.8-flash, then 2.5-flash, with retry on 503."""
+    models = ["gemini-3.8-flash", "gemini-2.5-flash"]
+    for model in models:
+        for attempt in range(2):
+            try:
+                response = gemini_client.models.generate_content(
+                    model=model,
+                    contents=_build_prompt(jobs_batch),
+                )
+                scores = _parse_scores(response.text, len(jobs_batch))
+                if scores:
+                    return scores
+                print(f"  Gemini/{model} returned unparseable output")
+            except Exception as e:
+                msg = str(e)
+                if "503" in msg or "UNAVAILABLE" in msg:
+                    print(f"  Gemini/{model} 503, retrying in {2**attempt}s...")
+                    time.sleep(2 ** attempt)
+                    continue
+                print(f"  Gemini/{model} error: {e}")
+                break
+    return None
 
-
-# ============ FETCHERS ============
 
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
     queries = [
-        "KYC Compliance",
-        "Prozessmanager",
-        "Ingenieur Junior",
-        "Regulatory Reporting",
-        "Technischer Redakteur",
+        "KYC Compliance", "Prozessmanager", "Ingenieur Junior",
+        "Regulatory Reporting", "Technischer Redakteur",
     ]
     all_jobs = []
     for q in queries:
@@ -247,56 +258,44 @@ def fetch_arbeitnow():
         return []
 
 
-# ============ FILTER ============
-
 def pre_filter(jobs):
     candidates = []
     hard_rejected = 0
     soft_penalized = 0
     seen = set()
-
     for job in jobs:
         title = job["title"].strip()
         if not title or title in seen:
             continue
         seen.add(title)
-
         title_l = title.lower()
         body_l = job["description"].lower()
         blob_l = title_l + " " + body_l
-
         if any(b in title_l for b in HARD_REJECT_TITLE):
             hard_rejected += 1
             continue
         if any(b in body_l for b in HARD_REJECT_BODY):
             hard_rejected += 1
             continue
-
         has_positive_title = any(p in title_l for p in POSITIVE_TITLE)
         has_positive_body = any(p in blob_l for p in POSITIVE_BODY)
         if not (has_positive_title or has_positive_body):
             hard_rejected += 1
             continue
-
         is_soft = any(s in blob_l for s in SOFT_PENALTY)
         if is_soft:
             soft_penalized += 1
-
         rank = (
             2 * sum(1 for p in POSITIVE_TITLE if p in title_l)
             + sum(1 for p in POSITIVE_BODY if p in blob_l)
             - (3 if is_soft else 0)
         )
         candidates.append((rank, job))
-
     candidates.sort(key=lambda x: x[0], reverse=True)
     return [c[1] for c in candidates], hard_rejected, soft_penalized
 
 
-# ============ TELEGRAM ============
-
 def send_telegram_chunked(header, items, footer=""):
-    """Send in chunks to respect Telegram 4096-char limit."""
     chunk = header
     for item in items:
         if len(chunk) + len(item) > 3800:
@@ -320,8 +319,6 @@ def _post(text):
     except Exception as e:
         print(f"Telegram error: {e}")
 
-
-# ============ MAIN ============
 
 def main():
     all_jobs = fetch_bundesagentur() + fetch_arbeitnow()
