@@ -10,7 +10,6 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
 
-# ---------- DACH location whitelist ----------
 DACH_CITIES = [
     "germany", "deutschland", "berlin", "münchen", "munich", "hamburg",
     "frankfurt", "köln", "cologne", "düsseldorf", "dusseldorf", "stuttgart",
@@ -20,7 +19,7 @@ DACH_CITIES = [
     "kiel", "rostock", "potsdam", "erfurt", "magdeburg", "saarbrücken",
     "krefeld", "wolfsburg", "ingolstadt", "regensburg", "ulm", "heilbronn",
     "paderborn", "bielefeld", "göttingen", "kassel", "würzburg",
-    "verl", "gütersloh", "guetersloh", "bielefeld", "espelkamp",
+    "verl", "gütersloh", "guetersloh", "espelkamp",
     "österreich", "austria", "wien", "vienna", "graz", "linz",
     "salzburg", "innsbruck", "klagenfurt",
 ]
@@ -29,7 +28,7 @@ def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
 
-# ---------- Hard reject titles (regex, word boundaries) ----------
+# Hard reject in TITLE
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -44,14 +43,18 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"ai.?engineer|platform.?engineer|infrastructure.?engineer|"
     r"engineering.?manager|product.?manager|program.?manager|"
     r"account.?manager|account.?executive|sales.?manager|"
-    r"marketing.?manager|hr.?manager|it.?manager|office.?manager|"
-    r"backoffice.?manager|supplier.?development|lieferantenmanager|"
+    r"marketing.?manager|hr.?manager|hr.?generalist|it.?manager|"
+    r"office.?manager|backoffice.?manager|"
+    r"supplier.?development|lieferantenmanager|"
     r"sales.?engineer|vertriebsingenieur|außendienst|aussendienst|"
     r"controller|fp.?&.?a|accounting|buchhaltung|bilanzbuchhalter|"
     r"ui.?ux|designer|grafiker|graphic|"
     r"iot|embedded|sentinel|quality.?inspector|optical|thermal|"
-    r"vehicle.?integration|forward.?deployed|"
-    r"call.?center|telefonist|"
+    r"vehicle|forward.?deployed|"
+    r"customer.?success|customer.?service|kundendienst|"
+    r"kundenbetreuer|kundenberater|call.?center|telefonist|"
+    r"systemadministrator|system.?administrator|it.?systemadmin|"
+    r"generalist|generalistin|recruiter|recruiting|"
     r"pflege|nursing|krankenpflege|"
     r"gastronomie|restaurant|hotel|kellner|koch|küche"
     r")\b",
@@ -71,7 +74,7 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- TIER 1: exact target roles (weight 5, REQUIRED) ----------
+# TIER1: exact target roles. Must appear in TITLE or first 400 chars of body.
 TIER1 = [
     "kyc", "know your customer", "compliance", "aml",
     "anti money laundering", "anti-money laundering",
@@ -87,7 +90,6 @@ TIER1 = [
     "technical writer", "technischer redakteur", "technische dokumentation",
 ]
 
-# ---------- TIER 2: soft signals (rank boost only, not enough alone) ----------
 TIER2 = [
     "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
     "absolvent", "junior", "trainee", "graduate",
@@ -97,17 +99,6 @@ TIER2 = [
     "reconciliation", "forderungsmanagement",
     "testing", "validierung", "quality assurance",
     "integration", "schnittstelle", "api",
-]
-
-POSITIVE_TITLE = [
-    "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
-    "absolvent", "junior", "trainee", "graduate",
-    "prozessmanager", "prozessmanagement", "projektmanager",
-    "compliance", "kyc", "aml", "regulatory", "meldewesen",
-    "dokumentation", "technical writer", "technischer redakteur",
-    "testingenieur", "test engineer", "integration engineer",
-    "data steward", "research data", "datenmanager",
-    "ingenieur", "ingenieurwesen", "wirtschaftsingenieur", "maschinenbau",
 ]
 
 MAX_SCORE = 15
@@ -134,6 +125,7 @@ def fetch_arbeitnow():
             timeout=30,
         )
         r.raise_for_status()
+        data = r.json().get("data", [])
         return [{
             "title": j.get("title", ""),
             "company": j.get("company_name", ""),
@@ -141,19 +133,17 @@ def fetch_arbeitnow():
             "description": j.get("description", ""),
             "url": j.get("url", ""),
             "source": "arbeitnow",
-        } for j in r.json().get("data", [])]
+        } for j in data]
     except Exception as e:
         print(f"Arbeitnow error: {e}")
         return []
 
 
 def fetch_bundesagentur():
+    """Debug version: prints response codes and snippets."""
     headers = {"X-API-Key": "jobboerse-jobsuche"}
-    queries = [
-        "KYC Compliance", "Prozessmanager", "Data Steward",
-        "Regulatory Reporting", "Technischer Redakteur",
-        "Geldwäsche", "Anforderungsmanager",
-    ]
+    queries = ["KYC Compliance", "Prozessmanager", "Data Steward",
+               "Regulatory Reporting", "Geldwäsche"]
     jobs = []
     seen = set()
     for q in queries:
@@ -163,8 +153,16 @@ def fetch_bundesagentur():
                 "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs",
                 headers=headers, params=params, timeout=30,
             )
-            r.raise_for_status()
-            for j in (r.json().get("ergebnisse") or r.json().get("ergebnisliste") or []):
+            print(f"  BA query '{q}': HTTP {r.status_code}, {len(r.content)} bytes")
+            if r.status_code != 200:
+                print(f"    response: {r.text[:200]}")
+                continue
+            data = r.json()
+            keys = list(data.keys())
+            print(f"    top-level keys: {keys}")
+            results = data.get("ergebnisse") or data.get("ergebnisliste") or []
+            print(f"    results: {len(results)}")
+            for j in results:
                 t = j.get("titel") or j.get("beruf", "")
                 if t and t not in seen:
                     seen.add(t)
@@ -180,7 +178,7 @@ def fetch_bundesagentur():
                         "source": "bundesagentur",
                     })
         except Exception as e:
-            print(f"BA error ({q}): {e}")
+            print(f"  BA '{q}' exception: {e}")
     return jobs
 
 
@@ -203,24 +201,24 @@ SCORING EXAMPLES:
 - "Prozessmanager" requiring 3+ years = 50
 - "Integration and Test Engineer" 0-2 years = 55
 
-NOT A FIT (these are 0-30, NEVER higher):
-- "Customer Success Associate" = 20
-- "Sales / Account Manager / Account Executive" = 5
-- "Full Stack / Backend / Frontend / DevOps" = 5
-- "Senior / Lead / Head of / Director" = 0
-- "Controller / FP&A / Accounting" = 15
-- "UI/UX / Designer" = 5
-- "Biosensor / Optical / Thermal / Lab Automation" = 15
-- "IT-Systemadministrator / System Engineer" = 30
-- "Quantitative Researcher / Quant" = 10
+NOT A FIT (0-25 ONLY, NEVER HIGHER):
+- Customer Success, Kundendienst, Kundenbetreuung = 15
+- Sales / Account Manager / Account Executive = 5
+- Full Stack / Backend / Frontend / DevOps = 5
+- Senior / Lead / Head of / Director = 0
+- Controller / FP&A / Accounting = 15
+- UI/UX / Designer = 5
+- IT-Systemadministrator / System Engineer = 25
+- HR Generalist / Recruiter = 5
+- Quantitative Researcher = 10
 - Any role requiring French/Spanish/Italian/Dutch = 0
 
 RULES:
-- Software developer/engineer roles: 5-15 max.
-- Any Senior/Lead/Head/Director title: 0-15.
-- C1 German required: cap 40.
-- More than 2 years experience required: cap 50.
-- Low-level backoffice without compliance/process content: 15-30.
+Software developer/engineer roles: 5-15 max.
+Any Senior/Lead/Head/Director title: 0-15.
+C1 German required: cap 40.
+More than 2 years experience required: cap 50.
+Low-level backoffice without compliance/process content: 15-30.
 
 Answer:"""
 
@@ -228,14 +226,11 @@ Answer:"""
 def parse_score(text):
     if not text:
         return None
-    # Prefer last integer (the model often writes reasoning first)
     nums = re.findall(r"\b(\d{1,3})\b", text)
-    if nums:
-        # Take last one that's in range
-        for n in reversed(nums):
-            i = int(n)
-            if 0 <= i <= 100:
-                return i
+    for n in reversed(nums):
+        i = int(n)
+        if 0 <= i <= 100:
+            return i
     return None
 
 
@@ -261,10 +256,8 @@ def score_groq(job):
                 mm = re.search(r"try again in ([\d.]+)s", msg)
                 if mm:
                     wait = min(float(mm.group(1)) + 3, 120)
-                print(f"    rate limit, wait {wait:.0f}s")
                 time.sleep(wait)
             else:
-                print(f"    groq error: {e}")
                 time.sleep(5)
     return None
 
@@ -290,9 +283,7 @@ def score_gemini(job):
 def rank_and_filter(jobs):
     out = []
     seen = set()
-    rejected_title = 0
-    rejected_body = 0
-    rejected_no_tier1 = 0
+    stats = {"title": 0, "body": 0, "no_tier1_in_title": 0, "kept": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -302,32 +293,32 @@ def rank_and_filter(jobs):
 
         tl = title.lower()
         bl = job["description"].lower()
-        blob = tl + " " + bl
+        body_head = bl[:400]  # Only first 400 chars count for TIER1
 
         if HARD_REJECT_TITLE_RE.search(tl):
-            rejected_title += 1
+            stats["title"] += 1
             continue
         if HARD_REJECT_BODY_RE.search(bl):
-            rejected_body += 1
+            stats["body"] += 1
             continue
 
-        # TIER1 required
-        t1_hits = sum(1 for p in TIER1 if p in blob)
-        if t1_hits == 0:
-            rejected_no_tier1 += 1
+        # TIER1 must be in TITLE or in first 400 chars of body
+        t1_title = sum(1 for p in TIER1 if p in tl)
+        t1_head = sum(1 for p in TIER1 if p in body_head)
+        if t1_title == 0 and t1_head == 0:
+            stats["no_tier1_in_title"] += 1
             continue
 
-        t2_hits = sum(1 for p in TIER2 if p in blob)
-        title_boost = 2 * sum(1 for p in POSITIVE_TITLE if p in tl)
-
-        rank = 5 * t1_hits + 2 * t2_hits + title_boost
+        t2 = sum(1 for p in TIER2 if p in (tl + " " + body_head))
+        rank = 10 * t1_title + 3 * t1_head + 1 * t2
+        stats["kept"] += 1
         out.append((rank, job))
 
     out.sort(key=lambda x: x[0], reverse=True)
-    print(f"Rejected (title): {rejected_title}")
-    print(f"Rejected (body): {rejected_body}")
-    print(f"Rejected (no TIER1): {rejected_no_tier1}")
-    print(f"Surviving: {len(out)}")
+    print(f"Rejected (title): {stats['title']}")
+    print(f"Rejected (body): {stats['body']}")
+    print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1_in_title']}")
+    print(f"Surviving: {stats['kept']}")
     return [x[1] for x in out]
 
 
@@ -344,15 +335,16 @@ def send_tg(text):
 
 
 def main():
+    print("=== Fetching ===")
     arbeitnow_raw = fetch_arbeitnow()
-    ba_raw = fetch_bundesagentur()
-
     print(f"Arbeitnow raw: {len(arbeitnow_raw)}")
-    print(f"Bundesagentur raw: {len(ba_raw)}")
 
-    # DACH filter for Arbeitnow (API ignores location param)
+    print("\n=== Bundesagentur debug ===")
+    ba_raw = fetch_bundesagentur()
+    print(f"Bundesagentur raw: {len(ba_raw)}\n")
+
     arbeitnow_dach = [j for j in arbeitnow_raw if is_dach(j["location"])]
-    print(f"Arbeitnow DACH: {len(arbeitnow_dach)}")
+    print(f"Arbeitnow DACH-filtered: {len(arbeitnow_dach)}")
 
     all_jobs = arbeitnow_dach + ba_raw
     print(f"Total usable: {len(all_jobs)}\n")
@@ -360,12 +352,15 @@ def main():
     candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
     print(f"\nWill score: {len(candidates)}\n")
 
+    if len(candidates) < 3:
+        print("WARNING: fewer than 3 candidates. This means TIER1 supply is low.")
+        print("Check the Bundesagentur debug output above.")
+
     matches = []
     for i, job in enumerate(candidates, 1):
         print(f"[{i}/{len(candidates)}] ({job['source']}) {job['title']} — {job['location']}")
         pct = score_groq(job)
         if pct is None:
-            print(f"  fallback to gemini")
             pct = score_gemini(job)
         if pct is None:
             print(f"  skipped")
