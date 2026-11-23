@@ -117,7 +117,7 @@ Respond with ONLY the integer. No explanation, no text.
 """
     try:
         response = client.models.generate_content(
-            model="gemini-2.0-flash",
+            model="gemini-3.8-flash",
             contents=prompt,
         )
         nums = re.findall(r"\d+", response.text.strip())
