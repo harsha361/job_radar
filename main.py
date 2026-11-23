@@ -15,7 +15,20 @@ KEYWORDS = [
     "prozessmanager", "prozessoptimierung", "prozessanalyse",
     "research software", "data steward", "fair data", "forschungsdaten",
     "regulatory reporting", "meldewesen", "schnittstelle", "datenintegration",
+    "forderungsmanagement", "zahlungsabwicklung", "regulatorik",
 ]
+
+# ---------- Hard exclusions (never score these) ----------
+BLOCK = [
+    "werkstudent", "working student", "praktikant", "praktikum",
+    "ausbildung", "auszubildende", "dual stud", "duales studium",
+    "internship", "intern ", "senior", "lead ", "head of",
+    "director", "principal", "vp ", "chief", "managing director",
+]
+
+# ---------- How many jobs to score per run (quota protection) ----------
+MAX_SCORE = 15
+MIN_MATCH = 55
 
 CV_SUMMARY = """
 M.Sc. Advanced Industrial Engineering (Grade 1.9), TH Rosenheim.
@@ -80,22 +93,34 @@ def fetch_arbeitnow():
 
 
 def score_job(title, description):
-    prompt = f"""Score this job from 0 to 100 against the candidate CV.
-Return ONLY the integer, nothing else, no explanation.
-
-JOB TITLE: {title}
-JOB DESCRIPTION: {description[:3000]}
+    prompt = f"""You are a strict, critical recruiter screening a candidate.
 
 CANDIDATE CV:
 {CV_SUMMARY}
+
+JOB:
+Title: {title}
+Description: {description[:3000]}
+
+Score this job from 0 to 100 using these rules:
+- 80-100: Near-perfect fit. Same domain, same level, requirements met.
+- 60-79: Strong fit. Adjacent domain, most requirements met.
+- 40-59: Possible but a stretch. Real gaps in domain or level.
+- 20-39: Weak. Wrong domain or clearly above/below candidate's level.
+- 0-19: Not a fit at all.
+
+Be harsh.
+A role requiring C1 German is capped at 40 for this candidate (B2).
+A back-office or Sachbearbeiter role is 20-30, not 87.
+
+Respond with ONLY the integer. No explanation, no text.
 """
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-2.0-flash",
             contents=prompt,
         )
-        text = response.text.strip()
-        nums = re.findall(r"\d+", text)
+        nums = re.findall(r"\d+", response.text.strip())
         return int(nums[0]) if nums else 0
     except Exception as e:
         print(f"Gemini error: {e}")
@@ -120,29 +145,58 @@ def main():
     print(f"Total fetched: {len(all_jobs)}")
 
     seen = set()
-    matches = []
+    candidates = []
 
+    # Stage 1: filter without spending Gemini quota
     for job in all_jobs:
         title = job["title"]
+        if not title:
+            continue
+
+        title_l = title.lower()
         blob = (title + " " + job["description"]).lower()
 
+        # Hard blocklist - never score these
+        if any(b in title_l for b in BLOCK):
+            continue
+
+        # Keyword relevance
         if not any(k in blob for k in KEYWORDS):
             continue
+
         if title in seen:
             continue
         seen.add(title)
 
-        pct = score_job(title, job["description"])
-        print(f"{pct:>3}%  {title}")
+        # Pre-rank by keyword density so we score the best first
+        density = sum(blob.count(k) for k in KEYWORDS)
+        candidates.append((density, job))
 
-        if pct >= 60:
+    # Sort by density, highest first
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    print(f"Filtered to: {len(candidates)} candidates")
+
+    # Stage 2: score only the top MAX_SCORE with Gemini
+    matches = []
+    scored = 0
+    for _, job in candidates:
+        if scored >= MAX_SCORE:
+            break
+        scored += 1
+
+        pct = score_job(job["title"], job["description"])
+        print(f"{pct:>3}%  {job['title']}")
+
+        if pct >= MIN_MATCH:
             matches.append({**job, "pct": pct})
 
-    matches.sort(key=lambda x: x["pct"], reverse=True)
+    print(f"Total scored: {scored}, matches above {MIN_MATCH}%: {len(matches)}")
 
     if not matches:
-        send_telegram("🎯 Job Radar: no jobs above 60% today.")
+        send_telegram(f"🎯 Job Radar: no jobs above {MIN_MATCH}% today (scored {scored}).")
         return
+
+    matches.sort(key=lambda x: x["pct"], reverse=True)
 
     lines = [f"<b>🎯 Job Radar — {len(matches)} matches</b>\n"]
     for m in matches[:10]:
