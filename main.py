@@ -36,6 +36,7 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"senior|sr|lead|head.?of|director|vp|chief|principal|staff|"
     r"managing.?director|geschäftsführer|leitung|führungskraft|"
     r"teamleiter|teamleiterin|projektleiter|"
+    r"experte|spezialist|"
     r"developer|entwickler|software.?engineer|full.?stack|fullstack|"
     r"backend|back.?end|frontend|front.?end|devops|site.?reliability|"
     r"cloud.?engineer|mobile.?developer|ios.?developer|android.?developer|"
@@ -73,6 +74,14 @@ HARD_REJECT_BODY_RE = re.compile(
     r")\b",
     re.IGNORECASE,
 )
+
+# Prozessmanager only counts if the body has a finance/compliance context
+PROZESS_DOMAIN = [
+    "bank", "finanz", "compliance", "kyc", "geldwäsche", "geldwaesche",
+    "aml", "regulatorik", "reporting", "zahlungsverkehr", "zahlung",
+    "wertpapier", "kredit", "versicherung", "meldewesen", "aufsicht",
+    "risk", "risiko", "treasury", "accounting", "rechnung",
+]
 
 TIER1 = [
     "kyc", "know your customer", "compliance", "aml",
@@ -144,7 +153,6 @@ def fetch_bundesagentur():
                "Regulatory Reporting", "Geldwäsche"]
     jobs = []
     seen = set()
-    dumped = False
 
     for q in queries:
         params = {"was": q, "size": 40, "page": 1, "veroeffentlichtseit": 14}
@@ -165,44 +173,45 @@ def fetch_bundesagentur():
                 if not isinstance(j, dict):
                     continue
 
-                if not dumped:
-                    print(f"    FIRST JOB keys: {list(j.keys())}")
-                    print(f"    FIRST JOB sample: {str(j)[:400]}")
-                    dumped = True
-
+                # Title from the correct field names
                 t = (
-                    j.get("titel")
+                    j.get("stellenangebotsTitel")
+                    or j.get("titel")
                     or j.get("beruf")
-                    or j.get("stellenangebotsTitel")
-                    or j.get("berufsbezeichnung")
                     or j.get("hauptberuf")
                     or ""
                 )
                 if not isinstance(t, str):
                     t = ""
                 t = t.strip()
-
                 if not t or t in seen:
                     continue
                 seen.add(t)
 
+                # Location from stellenlokationen[0].adresse.ort
                 loc = ""
-                ao = j.get("arbeitsort")
-                if isinstance(ao, dict):
-                    loc = ao.get("ort", "") or ""
-                elif isinstance(ao, str):
-                    loc = ao
+                lok = j.get("stellenlokationen")
+                if isinstance(lok, list) and lok:
+                    first = lok[0]
+                    if isinstance(first, dict):
+                        addr = first.get("adresse", {})
+                        if isinstance(addr, dict):
+                            loc = addr.get("ort", "") or ""
 
                 desc = j.get("beschreibung") or ""
                 if not isinstance(desc, str):
                     desc = ""
 
+                company = j.get("firma") or j.get("arbeitgeber") or ""
+
+                ref = j.get("referenznummer") or j.get("refnr") or ""
+
                 jobs.append({
                     "title": t,
-                    "company": j.get("arbeitgeber", "") or "",
+                    "company": company,
                     "location": loc or "Germany",
                     "description": desc,
-                    "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('refnr','')}",
+                    "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref}",
                     "source": "bundesagentur",
                 })
 
@@ -228,10 +237,12 @@ SCORING EXAMPLES:
 - "Junior Compliance Manager", "Berufseinsteiger willkommen" = 80
 - "Data Steward" research institute = 75
 - "Technical Writer" engineering = 65
-- "Prozessmanager" requiring 3+ years = 50
+- "Prozessmanager" finance/banking domain, 0-2 years = 65
+- "Prozessmanager" 3+ years required = 50
 - "Integration and Test Engineer" 0-2 years = 55
 
 NOT A FIT (0-25 ONLY, NEVER HIGHER):
+- Experte / Spezialist with 3+ years experience = 20
 - Customer Success, Kundendienst, Kundenbetreuung = 15
 - Sales / Account Manager / Account Executive = 5
 - Full Stack / Backend / Frontend / DevOps = 5
@@ -241,6 +252,7 @@ NOT A FIT (0-25 ONLY, NEVER HIGHER):
 - IT-Systemadministrator / System Engineer = 25
 - HR Generalist / Recruiter = 5
 - Quantitative Researcher = 10
+- Prozessmanager in production/defence/manufacturing = 25
 - Any role requiring French/Spanish/Italian/Dutch = 0
 
 RULES:
@@ -313,7 +325,7 @@ def score_gemini(job):
 def rank_and_filter(jobs):
     out = []
     seen = set()
-    stats = {"title": 0, "body": 0, "no_tier1": 0, "kept": 0}
+    stats = {"title": 0, "body": 0, "no_tier1": 0, "prozess_domain": 0, "kept": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -325,13 +337,24 @@ def rank_and_filter(jobs):
         bl = job["description"].lower()
         body_head = bl[:400]
 
+        # Title hard reject
         if HARD_REJECT_TITLE_RE.search(tl):
             stats["title"] += 1
             continue
+
+        # Body hard reject
         if HARD_REJECT_BODY_RE.search(bl):
             stats["body"] += 1
             continue
 
+        # Prozessmanager requires finance/compliance domain in the body
+        if ("prozessmanager" in tl or "prozessmanagement" in tl
+                or "prozessmanager" in body_head):
+            if not any(d in bl for d in PROZESS_DOMAIN):
+                stats["prozess_domain"] += 1
+                continue
+
+        # TIER1 must be in title or in first 400 chars of body
         t1_title = sum(1 for p in TIER1 if p in tl)
         t1_head = sum(1 for p in TIER1 if p in body_head)
         if t1_title == 0 and t1_head == 0:
@@ -346,6 +369,7 @@ def rank_and_filter(jobs):
     out.sort(key=lambda x: x[0], reverse=True)
     print(f"Rejected (title): {stats['title']}")
     print(f"Rejected (body): {stats['body']}")
+    print(f"Rejected (Prozessmanager wrong domain): {stats['prozess_domain']}")
     print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1']}")
     print(f"Surviving: {stats['kept']}")
     return [x[1] for x in out]
@@ -380,9 +404,6 @@ def main():
 
     candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
     print(f"\nWill score: {len(candidates)}\n")
-
-    if len(candidates) < 3:
-        print("WARNING: fewer than 3 candidates. Check the Bundesagentur debug output above.")
 
     matches = []
     for i, job in enumerate(candidates, 1):
