@@ -10,36 +10,33 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
 
-# ---------- HARD REJECT: titles ----------
+# ---------- Hard reject titles ----------
 HARD_REJECT_TITLE = [
-    # Student / intern
     "werkstudent", "working student", "praktikant", "praktikum",
     "ausbildung", "auszubildende", "azubi", "duales studium", "dual studium",
     "internship", "intern ",
-    # Senior / lead
     "senior", "sr.", "sr ", "lead ", "head of", "director", "vp ", "chief",
     "principal", "staff ", "managing director", "geschäftsführer", "leitung",
-    "führungskraft", "teamleiter", "teamleiterin",
-    # Software developer roles - the user is not a dev
+    "führungskraft", "teamleiter", "teamleiterin", "projektleiter",
     "developer", "entwickler", "software engineer", "full stack", "full-stack",
     "fullstack", "backend", "back-end", "back end", "frontend", "front-end",
     "front end", "devops", "site reliability", "cloud engineer",
     "mobile developer", "ios developer", "android developer",
-    "data engineer", "machine learning engineer", "ml engineer",
+    "data engineer", "machine learning", "ml engineer", "ml ops",
     "ai engineer", "platform engineer", "infrastructure engineer",
-    # Management that is not process/project
     "engineering manager", "product manager", "program manager",
-    "account manager", "sales manager", "marketing manager",
-    "hr manager", "it manager", "office manager", "backoffice manager",
-    # Other wrong domains
+    "account manager", "account executive", "sales manager",
+    "marketing manager", "hr manager", "it manager", "office manager",
+    "backoffice manager", "supplier development", "lieferantenmanager",
     "sales engineer", "vertriebsingenieur", "außendienst", "aussendienst",
+    "controller", "fp&a", "accounting", "buchhaltung", "bilanzbuchhalter",
+    "ui/ux", "ui designer", "ux designer", "designer", "grafiker",
+    "iot", "embedded", "sentinel", "quality inspector",
     "callcenter", "call center", "telefonist",
     "pflege", "nursing", "krankenpflege",
-    "gastronomie", "restaurant", "hotel",
-    "kellner", "koch", "küche",
+    "gastronomie", "restaurant", "hotel", "kellner", "koch", "küche",
 ]
 
-# ---------- HARD REJECT: body phrases ----------
 HARD_REJECT_BODY = [
     "c1 ", "c2 ", "verhandlungssicher", "muttersprache",
     "fließend deutsch", "fliessend deutsch",
@@ -48,44 +45,55 @@ HARD_REJECT_BODY = [
     "5+ jahre erfahrung", "3+ jahre erfahrung",
     "französisch", "french", "spanisch", "italienisch", "niederländisch",
     "maternity cover", "temporary contract", "befristet auf",
-    "callcenter", "call center",
 ]
 
-# ---------- POSITIVE signals ----------
+# ---------- TIER 1: exact target roles (weight 5) ----------
+TIER1_SPECIFIC = [
+    "kyc", "know your customer", "compliance", "aml", "anti money laundering",
+    "geldwäsche", "geldwaesche", "sanction", "sanktion",
+    "due diligence", "sorgfaltspflicht", "regulatory reporting", "meldewesen",
+    "regulatorik", "prozessmanager", "prozessmanagement", "prozessanalyse",
+    "prozessoptimierung", "process manager", "process management",
+    "data steward", "research data", "forschungsdaten", "fair data",
+    "data management", "datenmanagement", "metadaten", "metadata",
+    "data governance", "data quality", "datenqualität",
+    "requirements engineer", "requirements analysis", "anforderungsmanager",
+    "technical writer", "technischer redakteur", "technische dokumentation",
+    "integration engineer", "systemintegration", "schnittstellenmanager",
+]
+
+# ---------- TIER 2: adjacent (weight 2) ----------
+TIER2_ADJACENT = [
+    "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
+    "absolvent", "junior", "trainee", "graduate",
+    "prozess", "requirements", "anforderung",
+    "dokumentation", "documentation",
+    "reporting", "kpi", "zahlungsabwicklung", "payment",
+    "reconciliation", "forderungsmanagement",
+    "testing", "validierung", "quality assurance",
+    "integration", "schnittstelle", "api",
+]
+
+# ---------- TIER 3: generic engineering (weight 1, does not pass alone) ----------
+TIER3_GENERIC = [
+    "ingenieur", "engineer", "engineering", "finance", "financial",
+    "banking", "bank", "qualität", "quality", "testing", "test",
+    "digitalisierung", "digitalization", "automatisierung", "automation",
+]
+
 POSITIVE_TITLE = [
     "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
-    "absolvent", "einstieg", "einsteiger", "junior", "trainee", "graduate",
-    "ingenieur", "ingenieurwesen", "wirtschaftsingenieur", "maschinenbau",
-    "industrial engineering", "mechanical engineering",
-    "prozessmanager", "prozessmanagement", "projektmanager", "projektmanagement",
+    "absolvent", "junior", "trainee", "graduate",
+    "prozessmanager", "prozessmanagement", "projektmanager",
     "compliance", "kyc", "aml", "regulatory", "meldewesen",
     "dokumentation", "technical writer", "technischer redakteur",
     "testingenieur", "test engineer", "integration engineer",
     "data steward", "research data", "datenmanager",
-]
-
-POSITIVE_BODY = [
-    "berufseinsteiger", "willkommen", "ohne berufserfahrung",
-    "erste berufserfahrung", "quereinsteiger", "absolvent", "junior",
-    "englisch", "english", "international",
-    "ingenieurwesen", "wirtschaftsingenieurwesen", "maschinenbau", "mint",
-    "compliance", "kyc", "know your customer", "aml", "geldwäsche",
-    "sanktion", "sanction", "regulatorik", "regulatory", "meldewesen",
-    "sorgfaltspflicht", "due diligence",
-    "prozess", "prozessanalyse", "prozessoptimierung", "process management",
-    "project management", "projektmanagement", "anforderung", "requirements",
-    "datenmanagement", "datenanalyse", "data management", "data analysis",
-    "forschungsdaten", "research data", "fair data", "metadata", "metadaten",
-    "data steward", "data quality", "data governance",
-    "dokumentation", "documentation", "technical writer",
-    "finanz", "finance", "financial", "zahlungsabwicklung", "payment",
-    "reconciliation", "forderungsmanagement", "reporting", "banking",
-    "testing", "testingenieur", "quality", "qualität", "validierung",
-    "schnittstelle", "schnittstellen", "systemintegration",
+    "ingenieur", "ingenieurwesen", "wirtschaftsingenieur", "maschinenbau",
 ]
 
 MAX_SCORE = 15
-MIN_MATCH = 55
+MIN_MATCH = 45
 
 CV_SUMMARY = """
 M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen), TH Rosenheim.
@@ -105,8 +113,7 @@ def fetch_arbeitnow():
     try:
         r = requests.get(
             "https://www.arbeitnow.com/api/job-board-api",
-            params={"location": "Germany"},
-            timeout=30,
+            params={"location": "Germany"}, timeout=30,
         )
         r.raise_for_status()
         return [{
@@ -123,33 +130,36 @@ def fetch_arbeitnow():
 
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
-    params = {
-        "was": "KYC Compliance Prozessmanager Ingenieur",
-        "size": 60,
-        "page": 1,
-        "veroeffentlichtseit": 7,
-    }
-    try:
-        r = requests.get(
-            "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs",
-            headers=headers, params=params, timeout=30,
-        )
-        r.raise_for_status()
-        data = r.json()
-        return [{
-            "title": j.get("titel") or j.get("beruf", ""),
-            "company": j.get("arbeitgeber", ""),
-            "location": j.get("arbeitsort", {}).get("ort", "") if isinstance(j.get("arbeitsort"), dict) else "",
-            "description": j.get("beschreibung") or "",
-            "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('refnr','')}",
-        } for j in (data.get("ergebnisse") or data.get("ergebnisliste") or [])]
-    except Exception as e:
-        print(f"Bundesagentur error: {e}")
-        return []
+    queries = ["KYC Compliance", "Prozessmanager", "Data Steward",
+               "Regulatory Reporting", "Technischer Redakteur"]
+    jobs = []
+    seen = set()
+    for q in queries:
+        params = {"was": q, "size": 30, "page": 1, "veroeffentlichtseit": 7}
+        try:
+            r = requests.get(
+                "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs",
+                headers=headers, params=params, timeout=30,
+            )
+            r.raise_for_status()
+            for j in (r.json().get("ergebnisse") or r.json().get("ergebnisliste") or []):
+                t = j.get("titel") or j.get("beruf", "")
+                if t and t not in seen:
+                    seen.add(t)
+                    jobs.append({
+                        "title": t,
+                        "company": j.get("arbeitgeber", ""),
+                        "location": j.get("arbeitsort", {}).get("ort", "") if isinstance(j.get("arbeitsort"), dict) else "",
+                        "description": j.get("beschreibung") or "",
+                        "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('refnr','')}",
+                    })
+        except Exception as e:
+            print(f"BA error ({q}): {e}")
+    return jobs
 
 
 def build_prompt(job):
-    return f"""You are a STRICT recruiter scoring ONE job for a candidate.
+    return f"""Score this job 0-100 for the candidate. Return ONLY the integer.
 
 CANDIDATE:
 {CV_SUMMARY}
@@ -158,32 +168,31 @@ JOB:
 Title: {job['title']}
 Description: {job['description'][:2500]}
 
-SCORING EXAMPLES for THIS candidate:
+EXAMPLES:
 - "KYC Analyst" entry-level, English OK = 85
-- "Junior Compliance Manager" with "Berufseinsteiger willkommen" = 80
-- "Prozessmanager" requiring 3+ years = 50
-- "Data Steward" at a research institute, English = 75
-- "Technical Writer" in engineering = 65
-- "Backoffice Manager (Quereinstieg)" low-level admin = 20
-- "Controller" accounting role = 25
+- "Junior Compliance Manager" "Berufseinsteiger willkommen" = 80
+- "Data Steward" research institute = 75
+- "Technical Writer" engineering = 65
+- "Prozessmanager" 3+ years required = 50
+- "Integration and Test Engineer" 0-2 years = 55
+- "Controller" accounting = 20
 - "Full Stack Developer" = 5
 - "Senior Engineering Manager" = 0
 - "Sales Engineer" = 15
+- "UI/UX Designer" = 5
+- "Account Executive" = 5
+- "Supplier Development Manager" = 15
+- "Quality Inspector" factory = 25
 
 RULES:
-- If the role is a software developer, backend, frontend, full-stack, DevOps,
-  data engineer, ML engineer, or platform engineer: score 5-15 MAX.
-- If the title contains "Senior", "Lead", "Head", "Director", "Manager"
-  (unless it is "Prozessmanager", "Projektmanager", "Product Owner"):
-  score 0-15.
-- If the role requires C1/C2 German or "verhandlungssicher": cap at 40.
-- If the role requires more than 2 years experience: cap at 50.
-- If the role is low-level backoffice/Sachbearbeiter without a real process
-  or compliance component: score 15-30.
-- If the role requires French, Spanish, Italian or Dutch: score 0-10.
+Software developer/engineer roles: 5-15 max.
+Any title with Senior/Lead/Head/Director/Manager (except Prozessmanager/Projektmanager/Product Owner): 0-15.
+C1 German required: cap 40.
+More than 2 years experience required: cap 50.
+Low-level backoffice without compliance/process content: 15-30.
+French/Spanish/Italian/Dutch required: 0-10.
 
-Return ONLY one integer from 0 to 100. Nothing else. No explanation.
-"""
+Answer:"""
 
 
 def parse_score(text):
@@ -200,28 +209,31 @@ def parse_score(text):
 def score_groq(job):
     if not groq_client:
         return None
-    for attempt in range(3):
+    for attempt in range(2):
         try:
             r = groq_client.chat.completions.create(
                 model="openai/gpt-oss-20b",
                 messages=[{"role": "user", "content": build_prompt(job)}],
                 temperature=0.0,
-                max_completion_tokens=64,
+                max_completion_tokens=2048,
                 reasoning_effort="low",
             )
-            return parse_score(r.choices[0].message.content)
+            s = parse_score(r.choices[0].message.content)
+            if s is not None:
+                return s
+            print(f"    parse failed: {r.choices[0].message.content[:80]!r}")
         except Exception as e:
             msg = str(e)
             if "429" in msg or "rate_limit" in msg:
-                wait = 30
+                wait = 45
                 mm = re.search(r"try again in ([\d.]+)s", msg)
                 if mm:
-                    wait = min(float(mm.group(1)) + 2, 90)
+                    wait = min(float(mm.group(1)) + 3, 120)
                 print(f"    rate limit, wait {wait:.0f}s")
                 time.sleep(wait)
             else:
                 print(f"    groq error: {e}")
-                time.sleep(3)
+                time.sleep(5)
     return None
 
 
@@ -237,13 +249,14 @@ def score_gemini(job):
                     return s
             except Exception as e:
                 if "503" in str(e):
-                    time.sleep(5)
+                    time.sleep(8)
                     continue
                 break
     return None
 
 
-def pre_filter(jobs):
+def rank_and_filter(jobs):
+    """Tiered ranking: TIER1 >> TIER2 > TIER3. Requires TIER1 or TIER2 to pass."""
     out = []
     seen = set()
     rejected = 0
@@ -262,11 +275,18 @@ def pre_filter(jobs):
         if any(x in bl for x in HARD_REJECT_BODY):
             rejected += 1
             continue
-        if not (any(p in tl for p in POSITIVE_TITLE) or any(p in blob for p in POSITIVE_BODY)):
+
+        t1 = sum(1 for p in TIER1_SPECIFIC if p in blob)
+        t2 = sum(1 for p in TIER2_ADJACENT if p in blob)
+        t3 = sum(1 for p in TIER3_GENERIC if p in blob)
+        title_boost = 2 * sum(1 for p in POSITIVE_TITLE if p in tl)
+
+        # Must have at least one TIER1 or TIER2 hit
+        if t1 == 0 and t2 == 0:
             rejected += 1
             continue
 
-        rank = 2 * sum(1 for p in POSITIVE_TITLE if p in tl) + sum(1 for p in POSITIVE_BODY if p in blob)
+        rank = 5 * t1 + 2 * t2 + 1 * t3 + title_boost
         out.append((rank, job))
 
     out.sort(key=lambda x: x[0], reverse=True)
@@ -290,7 +310,7 @@ def main():
     jobs = fetch_arbeitnow() + fetch_bundesagentur()
     print(f"Total fetched: {len(jobs)}")
 
-    candidates = pre_filter(jobs)[:MAX_SCORE]
+    candidates = rank_and_filter(jobs)[:MAX_SCORE]
     print(f"Will score: {len(candidates)}\n")
 
     matches = []
@@ -298,15 +318,16 @@ def main():
         print(f"[{i}/{len(candidates)}] {job['title']}")
         pct = score_groq(job)
         if pct is None:
-            print(f"  groq failed, trying gemini")
+            print(f"  fallback to gemini")
             pct = score_gemini(job)
         if pct is None:
             print(f"  skipped")
+            time.sleep(12)
             continue
         print(f"  {pct}%")
         if pct >= MIN_MATCH:
             matches.append({**job, "pct": pct})
-        time.sleep(6)
+        time.sleep(12)
 
     matches.sort(key=lambda x: x["pct"], reverse=True)
     print(f"\nMatches: {len(matches)}")
