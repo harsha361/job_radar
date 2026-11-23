@@ -10,60 +10,85 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
 
-# ---------- Hard reject titles ----------
-HARD_REJECT_TITLE = [
-    "werkstudent", "working student", "praktikant", "praktikum",
-    "ausbildung", "auszubildende", "azubi", "duales studium", "dual studium",
-    "internship", "intern ",
-    "senior", "sr.", "sr ", "lead ", "head of", "director", "vp ", "chief",
-    "principal", "staff ", "managing director", "geschäftsführer", "leitung",
-    "führungskraft", "teamleiter", "teamleiterin", "projektleiter",
-    "developer", "entwickler", "software engineer", "full stack", "full-stack",
-    "fullstack", "backend", "back-end", "back end", "frontend", "front-end",
-    "front end", "devops", "site reliability", "cloud engineer",
-    "mobile developer", "ios developer", "android developer",
-    "data engineer", "machine learning", "ml engineer", "ml ops",
-    "ai engineer", "platform engineer", "infrastructure engineer",
-    "engineering manager", "product manager", "program manager",
-    "account manager", "account executive", "sales manager",
-    "marketing manager", "hr manager", "it manager", "office manager",
-    "backoffice manager", "supplier development", "lieferantenmanager",
-    "sales engineer", "vertriebsingenieur", "außendienst", "aussendienst",
-    "controller", "fp&a", "accounting", "buchhaltung", "bilanzbuchhalter",
-    "ui/ux", "ui designer", "ux designer", "designer", "grafiker",
-    "iot", "embedded", "sentinel", "quality inspector",
-    "callcenter", "call center", "telefonist",
-    "pflege", "nursing", "krankenpflege",
-    "gastronomie", "restaurant", "hotel", "kellner", "koch", "küche",
+# ---------- DACH location whitelist ----------
+DACH_CITIES = [
+    "germany", "deutschland", "berlin", "münchen", "munich", "hamburg",
+    "frankfurt", "köln", "cologne", "düsseldorf", "dusseldorf", "stuttgart",
+    "leipzig", "dresden", "hannover", "nürnberg", "nuremberg", "bremen",
+    "essen", "dortmund", "bonn", "mainz", "wiesbaden", "karlsruhe",
+    "mannheim", "augsburg", "aachen", "münster", "muenster", "freiburg",
+    "kiel", "rostock", "potsdam", "erfurt", "magdeburg", "saarbrücken",
+    "krefeld", "wolfsburg", "ingolstadt", "regensburg", "ulm", "heilbronn",
+    "paderborn", "bielefeld", "göttingen", "kassel", "würzburg",
+    "verl", "gütersloh", "guetersloh", "bielefeld", "espelkamp",
+    "österreich", "austria", "wien", "vienna", "graz", "linz",
+    "salzburg", "innsbruck", "klagenfurt",
 ]
 
-HARD_REJECT_BODY = [
-    "c1 ", "c2 ", "verhandlungssicher", "muttersprache",
-    "fließend deutsch", "fliessend deutsch",
-    "native german", "german native", "deutsch als muttersprache",
-    "mehrjährige erfahrung", "mindestens 3 jahre", "mindestens 5 jahre",
-    "5+ jahre erfahrung", "3+ jahre erfahrung",
-    "französisch", "french", "spanisch", "italienisch", "niederländisch",
-    "maternity cover", "temporary contract", "befristet auf",
-]
+def is_dach(location):
+    loc = (location or "").lower()
+    return any(c in loc for c in DACH_CITIES)
 
-# ---------- TIER 1: exact target roles (weight 5) ----------
-TIER1_SPECIFIC = [
-    "kyc", "know your customer", "compliance", "aml", "anti money laundering",
+# ---------- Hard reject titles (regex, word boundaries) ----------
+HARD_REJECT_TITLE_RE = re.compile(
+    r"\b("
+    r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
+    r"auszubildende|azubi|dual(es)? studium|internship|intern|"
+    r"senior|sr|lead|head.?of|director|vp|chief|principal|staff|"
+    r"managing.?director|geschäftsführer|leitung|führungskraft|"
+    r"teamleiter|teamleiterin|projektleiter|"
+    r"developer|entwickler|software.?engineer|full.?stack|fullstack|"
+    r"backend|back.?end|frontend|front.?end|devops|site.?reliability|"
+    r"cloud.?engineer|mobile.?developer|ios.?developer|android.?developer|"
+    r"data.?engineer|machine.?learning|ml.?engineer|ml.?ops|"
+    r"ai.?engineer|platform.?engineer|infrastructure.?engineer|"
+    r"engineering.?manager|product.?manager|program.?manager|"
+    r"account.?manager|account.?executive|sales.?manager|"
+    r"marketing.?manager|hr.?manager|it.?manager|office.?manager|"
+    r"backoffice.?manager|supplier.?development|lieferantenmanager|"
+    r"sales.?engineer|vertriebsingenieur|außendienst|aussendienst|"
+    r"controller|fp.?&.?a|accounting|buchhaltung|bilanzbuchhalter|"
+    r"ui.?ux|designer|grafiker|graphic|"
+    r"iot|embedded|sentinel|quality.?inspector|optical|thermal|"
+    r"vehicle.?integration|forward.?deployed|"
+    r"call.?center|telefonist|"
+    r"pflege|nursing|krankenpflege|"
+    r"gastronomie|restaurant|hotel|kellner|koch|küche"
+    r")\b",
+    re.IGNORECASE,
+)
+
+HARD_REJECT_BODY_RE = re.compile(
+    r"\b("
+    r"c1|c2|verhandlungssicher|muttersprache|"
+    r"fließend.?deutsch|fliessend.?deutsch|"
+    r"native.?german|deutsch.?als.?muttersprache|"
+    r"mehrjährige.?erfahrung|mehrjaehrige.?erfahrung|"
+    r"mindestens.?\d.?jahre|"
+    r"französisch|french|spanisch|italienisch|niederländisch|"
+    r"maternity.?cover|temporary.?contract|befristet.?auf"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ---------- TIER 1: exact target roles (weight 5, REQUIRED) ----------
+TIER1 = [
+    "kyc", "know your customer", "compliance", "aml",
+    "anti money laundering", "anti-money laundering",
     "geldwäsche", "geldwaesche", "sanction", "sanktion",
-    "due diligence", "sorgfaltspflicht", "regulatory reporting", "meldewesen",
-    "regulatorik", "prozessmanager", "prozessmanagement", "prozessanalyse",
+    "due diligence", "sorgfaltspflicht",
+    "regulatory reporting", "meldewesen", "regulatorik",
+    "prozessmanager", "prozessmanagement", "prozessanalyse",
     "prozessoptimierung", "process manager", "process management",
     "data steward", "research data", "forschungsdaten", "fair data",
     "data management", "datenmanagement", "metadaten", "metadata",
     "data governance", "data quality", "datenqualität",
     "requirements engineer", "requirements analysis", "anforderungsmanager",
     "technical writer", "technischer redakteur", "technische dokumentation",
-    "integration engineer", "systemintegration", "schnittstellenmanager",
 ]
 
-# ---------- TIER 2: adjacent (weight 2) ----------
-TIER2_ADJACENT = [
+# ---------- TIER 2: soft signals (rank boost only, not enough alone) ----------
+TIER2 = [
     "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
     "absolvent", "junior", "trainee", "graduate",
     "prozess", "requirements", "anforderung",
@@ -72,13 +97,6 @@ TIER2_ADJACENT = [
     "reconciliation", "forderungsmanagement",
     "testing", "validierung", "quality assurance",
     "integration", "schnittstelle", "api",
-]
-
-# ---------- TIER 3: generic engineering (weight 1, does not pass alone) ----------
-TIER3_GENERIC = [
-    "ingenieur", "engineer", "engineering", "finance", "financial",
-    "banking", "bank", "qualität", "quality", "testing", "test",
-    "digitalisierung", "digitalization", "automatisierung", "automation",
 ]
 
 POSITIVE_TITLE = [
@@ -93,7 +111,7 @@ POSITIVE_TITLE = [
 ]
 
 MAX_SCORE = 15
-MIN_MATCH = 45
+MIN_MATCH = 50
 
 CV_SUMMARY = """
 M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen), TH Rosenheim.
@@ -113,7 +131,7 @@ def fetch_arbeitnow():
     try:
         r = requests.get(
             "https://www.arbeitnow.com/api/job-board-api",
-            params={"location": "Germany"}, timeout=30,
+            timeout=30,
         )
         r.raise_for_status()
         return [{
@@ -122,6 +140,7 @@ def fetch_arbeitnow():
             "location": j.get("location", ""),
             "description": j.get("description", ""),
             "url": j.get("url", ""),
+            "source": "arbeitnow",
         } for j in r.json().get("data", [])]
     except Exception as e:
         print(f"Arbeitnow error: {e}")
@@ -130,12 +149,15 @@ def fetch_arbeitnow():
 
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
-    queries = ["KYC Compliance", "Prozessmanager", "Data Steward",
-               "Regulatory Reporting", "Technischer Redakteur"]
+    queries = [
+        "KYC Compliance", "Prozessmanager", "Data Steward",
+        "Regulatory Reporting", "Technischer Redakteur",
+        "Geldwäsche", "Anforderungsmanager",
+    ]
     jobs = []
     seen = set()
     for q in queries:
-        params = {"was": q, "size": 30, "page": 1, "veroeffentlichtseit": 7}
+        params = {"was": q, "size": 40, "page": 1, "veroeffentlichtseit": 14}
         try:
             r = requests.get(
                 "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs",
@@ -146,12 +168,16 @@ def fetch_bundesagentur():
                 t = j.get("titel") or j.get("beruf", "")
                 if t and t not in seen:
                     seen.add(t)
+                    loc = ""
+                    if isinstance(j.get("arbeitsort"), dict):
+                        loc = j["arbeitsort"].get("ort", "")
                     jobs.append({
                         "title": t,
                         "company": j.get("arbeitgeber", ""),
-                        "location": j.get("arbeitsort", {}).get("ort", "") if isinstance(j.get("arbeitsort"), dict) else "",
+                        "location": loc or "Germany",
                         "description": j.get("beschreibung") or "",
                         "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('refnr','')}",
+                        "source": "bundesagentur",
                     })
         except Exception as e:
             print(f"BA error ({q}): {e}")
@@ -166,31 +192,35 @@ CANDIDATE:
 
 JOB:
 Title: {job['title']}
+Location: {job['location']}
 Description: {job['description'][:2500]}
 
-EXAMPLES:
+SCORING EXAMPLES:
 - "KYC Analyst" entry-level, English OK = 85
-- "Junior Compliance Manager" "Berufseinsteiger willkommen" = 80
+- "Junior Compliance Manager", "Berufseinsteiger willkommen" = 80
 - "Data Steward" research institute = 75
 - "Technical Writer" engineering = 65
-- "Prozessmanager" 3+ years required = 50
+- "Prozessmanager" requiring 3+ years = 50
 - "Integration and Test Engineer" 0-2 years = 55
-- "Controller" accounting = 20
-- "Full Stack Developer" = 5
-- "Senior Engineering Manager" = 0
-- "Sales Engineer" = 15
-- "UI/UX Designer" = 5
-- "Account Executive" = 5
-- "Supplier Development Manager" = 15
-- "Quality Inspector" factory = 25
+
+NOT A FIT (these are 0-30, NEVER higher):
+- "Customer Success Associate" = 20
+- "Sales / Account Manager / Account Executive" = 5
+- "Full Stack / Backend / Frontend / DevOps" = 5
+- "Senior / Lead / Head of / Director" = 0
+- "Controller / FP&A / Accounting" = 15
+- "UI/UX / Designer" = 5
+- "Biosensor / Optical / Thermal / Lab Automation" = 15
+- "IT-Systemadministrator / System Engineer" = 30
+- "Quantitative Researcher / Quant" = 10
+- Any role requiring French/Spanish/Italian/Dutch = 0
 
 RULES:
-Software developer/engineer roles: 5-15 max.
-Any title with Senior/Lead/Head/Director/Manager (except Prozessmanager/Projektmanager/Product Owner): 0-15.
-C1 German required: cap 40.
-More than 2 years experience required: cap 50.
-Low-level backoffice without compliance/process content: 15-30.
-French/Spanish/Italian/Dutch required: 0-10.
+- Software developer/engineer roles: 5-15 max.
+- Any Senior/Lead/Head/Director title: 0-15.
+- C1 German required: cap 40.
+- More than 2 years experience required: cap 50.
+- Low-level backoffice without compliance/process content: 15-30.
 
 Answer:"""
 
@@ -198,11 +228,14 @@ Answer:"""
 def parse_score(text):
     if not text:
         return None
-    m = re.search(r"\b(\d{1,3})\b", text.strip())
-    if m:
-        n = int(m.group(1))
-        if 0 <= n <= 100:
-            return n
+    # Prefer last integer (the model often writes reasoning first)
+    nums = re.findall(r"\b(\d{1,3})\b", text)
+    if nums:
+        # Take last one that's in range
+        for n in reversed(nums):
+            i = int(n)
+            if 0 <= i <= 100:
+                return i
     return None
 
 
@@ -221,7 +254,6 @@ def score_groq(job):
             s = parse_score(r.choices[0].message.content)
             if s is not None:
                 return s
-            print(f"    parse failed: {r.choices[0].message.content[:80]!r}")
         except Exception as e:
             msg = str(e)
             if "429" in msg or "rate_limit" in msg:
@@ -256,41 +288,46 @@ def score_gemini(job):
 
 
 def rank_and_filter(jobs):
-    """Tiered ranking: TIER1 >> TIER2 > TIER3. Requires TIER1 or TIER2 to pass."""
     out = []
     seen = set()
-    rejected = 0
+    rejected_title = 0
+    rejected_body = 0
+    rejected_no_tier1 = 0
+
     for job in jobs:
         title = job["title"].strip()
         if not title or title in seen:
             continue
         seen.add(title)
+
         tl = title.lower()
         bl = job["description"].lower()
         blob = tl + " " + bl
 
-        if any(x in tl for x in HARD_REJECT_TITLE):
-            rejected += 1
+        if HARD_REJECT_TITLE_RE.search(tl):
+            rejected_title += 1
             continue
-        if any(x in bl for x in HARD_REJECT_BODY):
-            rejected += 1
+        if HARD_REJECT_BODY_RE.search(bl):
+            rejected_body += 1
             continue
 
-        t1 = sum(1 for p in TIER1_SPECIFIC if p in blob)
-        t2 = sum(1 for p in TIER2_ADJACENT if p in blob)
-        t3 = sum(1 for p in TIER3_GENERIC if p in blob)
+        # TIER1 required
+        t1_hits = sum(1 for p in TIER1 if p in blob)
+        if t1_hits == 0:
+            rejected_no_tier1 += 1
+            continue
+
+        t2_hits = sum(1 for p in TIER2 if p in blob)
         title_boost = 2 * sum(1 for p in POSITIVE_TITLE if p in tl)
 
-        # Must have at least one TIER1 or TIER2 hit
-        if t1 == 0 and t2 == 0:
-            rejected += 1
-            continue
-
-        rank = 5 * t1 + 2 * t2 + 1 * t3 + title_boost
+        rank = 5 * t1_hits + 2 * t2_hits + title_boost
         out.append((rank, job))
 
     out.sort(key=lambda x: x[0], reverse=True)
-    print(f"Rejected: {rejected}, Surviving: {len(out)}")
+    print(f"Rejected (title): {rejected_title}")
+    print(f"Rejected (body): {rejected_body}")
+    print(f"Rejected (no TIER1): {rejected_no_tier1}")
+    print(f"Surviving: {len(out)}")
     return [x[1] for x in out]
 
 
@@ -307,15 +344,25 @@ def send_tg(text):
 
 
 def main():
-    jobs = fetch_arbeitnow() + fetch_bundesagentur()
-    print(f"Total fetched: {len(jobs)}")
+    arbeitnow_raw = fetch_arbeitnow()
+    ba_raw = fetch_bundesagentur()
 
-    candidates = rank_and_filter(jobs)[:MAX_SCORE]
-    print(f"Will score: {len(candidates)}\n")
+    print(f"Arbeitnow raw: {len(arbeitnow_raw)}")
+    print(f"Bundesagentur raw: {len(ba_raw)}")
+
+    # DACH filter for Arbeitnow (API ignores location param)
+    arbeitnow_dach = [j for j in arbeitnow_raw if is_dach(j["location"])]
+    print(f"Arbeitnow DACH: {len(arbeitnow_dach)}")
+
+    all_jobs = arbeitnow_dach + ba_raw
+    print(f"Total usable: {len(all_jobs)}\n")
+
+    candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
+    print(f"\nWill score: {len(candidates)}\n")
 
     matches = []
     for i, job in enumerate(candidates, 1):
-        print(f"[{i}/{len(candidates)}] {job['title']}")
+        print(f"[{i}/{len(candidates)}] ({job['source']}) {job['title']} — {job['location']}")
         pct = score_groq(job)
         if pct is None:
             print(f"  fallback to gemini")
