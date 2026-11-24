@@ -12,6 +12,7 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
 
+# ---------- Germany + Austria only. Switzerland removed. ----------
 DACH_CITIES = [
     "germany", "deutschland", "berlin", "münchen", "munich", "hamburg",
     "frankfurt", "köln", "cologne", "düsseldorf", "dusseldorf", "stuttgart",
@@ -24,12 +25,21 @@ DACH_CITIES = [
     "verl", "gütersloh", "guetersloh", "espelkamp",
     "österreich", "austria", "wien", "vienna", "graz", "linz",
     "salzburg", "innsbruck", "klagenfurt",
-    "switzerland", "schweiz", "zürich", "zurich", "basel", "bern", "genf", "geneva",
 ]
 
 def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
+
+# ---------- NEW: Switzerland hard filter ----------
+SWITZERLAND_RE = re.compile(
+    r"\b(switzerland|schweiz|zürich|zurich|basel|bern|genf|geneva|"
+    r"luzern|lausanne|winterthur|st\.?\s*gallen|ch-)\b",
+    re.IGNORECASE,
+)
+
+def is_switzerland(location):
+    return bool(SWITZERLAND_RE.search(location or ""))
 
 # ---------- Hard reject titles ----------
 HARD_REJECT_TITLE_RE = re.compile(
@@ -64,18 +74,73 @@ HARD_REJECT_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ---------- Hard reject body (FIXED mehrjährige + mindestens patterns) ----------
 HARD_REJECT_BODY_RE = re.compile(
     r"\b("
     r"c1|c2|verhandlungssicher|muttersprache|"
     r"fließend.?deutsch|fliessend.?deutsch|"
     r"native.?german|deutsch.?als.?muttersprache|"
-    r"mehrjährige.?erfahrung|mehrjaehrige.?erfahrung|"
-    r"mindestens.?\d.?jahre|"
+    r"mehrjährige\s*(?:berufs)?erfahrung|mehrjaehrige\s*(?:berufs)?erfahrung|"
+    r"mindestens\s*\d+\s*jahre|mind\.\s*\d+\s*jahre|"
+    r"mindestens\s+(?:zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+jahre|"
     r"französisch|french|spanisch|italienisch|niederländisch|"
     r"maternity.?cover|temporary.?contract|befristet.?auf|"
     r"kyc|aml|geldwäsche|compliance|bankkaufmann|bankkauffrau|"
     r"data steward|master data|stammdaten"
     r")\b",
+    re.IGNORECASE,
+)
+
+# ---------- NEW: Entry-level signals (searched in JD body) ----------
+ENTRY_LEVEL_PHRASES = [
+    "berufseinsteiger", "berufseinsteigerin", "berufseinsteigerinnen",
+    "berufseinsteiger:innen", "berufseinsteiger*innen",
+    "berufseinstieg",
+    "berufsanfänger", "berufsanfaenger", "berufsanfängerin", "berufsanfängerinnen",
+    "berufsanfänger:innen", "berufsanfänger*innen",
+    "hochschulabsolvent", "hochschulabsolventen", "hochschulabsolventin",
+    "hochschulabsolventinnen", "hochschulabsolvent:innen", "hochschulabsolvent*innen",
+    "absolvent", "absolventen", "absolventin", "absolventinnen",
+    "absolvent:innen", "absolvent*innen",
+    "trainee", "traineeprogramm", "trainee-programm", "trainee programm",
+    "graduate", "graduates",
+    "einsteiger", "einsteigerin", "einsteigerinnen", "einsteiger:innen",
+    "junior", "juniorstelle", "junior-stelle",
+    "quereinsteiger", "quereinsteigerin", "quereinsteigerinnen",
+    "quereinsteiger:innen", "quereinsteiger*innen", "quereinstieg",
+    "keine berufserfahrung", "ohne berufserfahrung",
+    "keine vorkenntnisse", "ohne vorkenntnisse",
+    "erfahrung ist egal", "berufserfahrung ist egal", "erfahrung egal",
+    "erfahrung: egal", "berufserfahrung: egal",
+    "berufserfahrung nicht erforderlich", "erfahrung nicht erforderlich",
+    "berufserfahrung nicht zwingend", "erfahrung nicht zwingend",
+    "vorkenntnisse nicht erforderlich", "vorkenntnisse nicht zwingend",
+    "auch berufseinsteiger willkommen", "berufseinsteiger willkommen",
+    "berufseinsteiger sind auch willkommen",
+    "berufseinsteiger:innen sind auch willkommen",
+    "auch berufseinsteiger:innen willkommen",
+    "auch ohne berufserfahrung", "auch ohne erfahrung",
+    "auch quereinsteiger willkommen", "quereinsteiger willkommen",
+    "auch quereinsteiger:innen willkommen",
+    "wir freuen uns auf berufseinsteiger", "wir freuen uns über berufseinsteiger",
+    "0-1 jahre", "0 bis 1 jahre", "0-2 jahre", "0 bis 2 jahre",
+    "0-3 jahre", "0 bis 3 jahre", "1-2 jahre", "1 bis 2 jahre",
+    "1-3 jahre", "1 bis 3 jahre", "bis zu 2 jahre", "bis zu 3 jahre",
+    "maximal 2 jahre", "maximal 3 jahre",
+    "erste berufserfahrung", "erste erfahrung", "erste praktische erfahrung",
+    "1 jahr erfahrung", "1 jahr berufserfahrung",
+]
+
+# ---------- NEW: Mid-level penalty (soft, not elimination) ----------
+MID_LEVEL_PENALTY_RE = re.compile(
+    r"("
+    r"erfahrene[rn]?\s+(?:persönlichkeit|fachkraft|ingenieur|entwickler|mitarbeiter)|"
+    r"mehrere\s+jahre\s+(?:berufs)?erfahrung|"
+    r"langjährige\s+(?:berufs)?erfahrung|"
+    r"fundierte\s+(?:berufs)?erfahrung|"
+    r"(?:[3-9]|\d{2,})\s*[-–]\s*\d+\s*jahre\s*(?:berufs)?erfahrung|"
+    r"(?:[3-9]|\d{2,})\+?\s*jahre\s*(?:berufs)?erfahrung"
+    r")",
     re.IGNORECASE,
 )
 
@@ -161,7 +226,7 @@ gemini_client = genai.Client(api_key=GEMINI_KEY)
 
 
 # ============================================================
-# EXISTING FETCHERS (kept)
+# FETCHERS (12 free sources)
 # ============================================================
 
 def fetch_arbeitnow():
@@ -289,12 +354,7 @@ def fetch_academics_de():
     return jobs
 
 
-# ============================================================
-# NEW FREE FETCHERS (no paid API, no token)
-# ============================================================
-
 def _parse_rss(url, source_name, default_location="Germany / Remote", title_filter=None):
-    """Generic RSS parser used for EURAXESS, WWR, Remotive, BerlinStartupJobs."""
     jobs = []
     try:
         r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
@@ -324,7 +384,6 @@ def _parse_rss(url, source_name, default_location="Germany / Remote", title_filt
 
 
 def fetch_euraxess():
-    """RSS feed for EU research jobs (DE/AT/EU)."""
     return _parse_rss(
         "https://www.euraxess.ba/sr/services/jobs/rss",
         "euraxess",
@@ -334,7 +393,6 @@ def fetch_euraxess():
 
 
 def fetch_weworkremotely():
-    """RSS for We Work Remotely – programming category."""
     return _parse_rss(
         "https://weworkremotely.com/categories/remote-programming-jobs.rss",
         "weworkremotely",
@@ -344,7 +402,6 @@ def fetch_weworkremotely():
 
 
 def fetch_remotive():
-    """RSS for Remotive – engineering category."""
     return _parse_rss(
         "https://remotive.com/remote-jobs/feed/engineering",
         "remotive",
@@ -354,7 +411,6 @@ def fetch_remotive():
 
 
 def fetch_berlinstartupjobs():
-    """RSS for BerlinStartupJobs – English-heavy startup roles."""
     return _parse_rss(
         "https://berlinstartupjobs.com/feed/",
         "berlinstartupjobs",
@@ -364,7 +420,6 @@ def fetch_berlinstartupjobs():
 
 
 def fetch_kowi():
-    """KoWi central research-institute listings (Helmholtz, Leibniz, Fraunhofer)."""
     jobs = []
     try:
         r = requests.get(
@@ -398,7 +453,6 @@ def fetch_kowi():
 
 
 def fetch_jobriver():
-    """JOBRIVER – German IT-specialist board, lower crowded than StepStone."""
     jobs = []
     seen = set()
     queries = ["systemintegration", "testingenieur", "automatisierung", "python", "messtechnik", "daten"]
@@ -429,7 +483,6 @@ def fetch_jobriver():
 
 
 def fetch_jobs_daheim():
-    """Jobs-Daheim.de – remote-friendly DACH roles."""
     jobs = []
     try:
         r = requests.get(
@@ -456,7 +509,6 @@ def fetch_jobs_daheim():
 
 
 def fetch_englishjobs():
-    """EnglishJobs.de – English-only roles in Germany."""
     jobs = []
     seen = set()
     try:
@@ -486,7 +538,6 @@ def fetch_englishjobs():
 
 
 def fetch_germantechjobs():
-    """GermanTechJobs – English-heavy tech roles in Germany."""
     jobs = []
     seen = set()
     try:
@@ -516,7 +567,7 @@ def fetch_germantechjobs():
 
 
 # ============================================================
-# SCORING / FILTERING (kept)
+# SCORING
 # ============================================================
 
 def build_prompt(job):
@@ -540,6 +591,7 @@ SCORING EXAMPLES (PURE TECHNICAL FOCUS):
 - "Technical Writer" (Engineering, DIN/ISO) = 75
 - "Requirements Engineer" = 70
 - "Prozessmanager" in IT or Engineering = 60
+- "Berufseinsteiger / Trainee / Hochschulabsolvent / Graduate role" (technical fit) = 85
 
 NOT A FIT (0-25 ONLY, NEVER HIGHER):
 - KYC / AML / Compliance / Bankkaufmann = 0 (Candidate is pivoting away)
@@ -559,6 +611,9 @@ C1 German required = cap at 40.
 B2 German required but NOT English-primary = cap at 65.
 More than 3 years experience required = cap at 50.
 Low-level manual testing or basic Excel data entry = 20 max.
+Entry-level / Berufseinsteiger / Trainee / Hochschulabsolvent roles = boost by +10.
+Roles requiring 3+ years experience = cap at 40.
+"Mehrjährige Berufserfahrung" or "mindestens 3 Jahre" = cap at 30.
 
 Answer:"""
 
@@ -657,10 +712,21 @@ def rank_and_filter(jobs):
         if GERMAN_ONLY_RE.search(bl) and not ENGLISH_PRIMARY_RE.search(bl):
             rank -= 3
 
-        # Free niche-source boosts (less crowded = higher priority)
         if job.get("source") in ("academics_de", "kowi", "euraxess", "jobriver",
                                   "jobs_daheim", "englishjobs", "germantechjobs"):
             rank += 4
+
+        # Entry-level boost / mid-level penalty
+        entry_hits = sum(1 for phrase in ENTRY_LEVEL_PHRASES if phrase in bl)
+        if entry_hits:
+            rank += min(entry_hits * 3, 15)
+
+        if any(k in tl for k in ["junior", "trainee", "absolvent", "einsteiger",
+                                  "graduate", "berufseinsteiger", "hochschulabsolvent"]):
+            rank += 5
+
+        if MID_LEVEL_PENALTY_RE.search(bl):
+            rank -= 5
 
         stats["kept"] += 1
         out.append((rank, job))
@@ -694,11 +760,11 @@ def send_tg(text):
 
 
 # ============================================================
-# MAIN — all free sources, no paid APIs
+# MAIN
 # ============================================================
 
 def main():
-    print("=== Fetching (free sources only) ===")
+    print("=== Fetching (free sources only, DE + AT) ===")
     arbeitnow_raw   = fetch_arbeitnow()
     ba_raw          = fetch_bundesagentur()
     academics_raw   = fetch_academics_de()
@@ -720,6 +786,9 @@ def main():
         + berlin_raw + jobriver_raw + daheim_raw
         + englishjobs_raw + germantech_raw
     )
+
+    # Switzerland removed
+    all_jobs = [j for j in all_jobs if not is_switzerland(j.get("location", ""))]
     print(f"Total usable: {len(all_jobs)}\n")
 
     candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
