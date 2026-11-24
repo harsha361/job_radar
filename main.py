@@ -31,7 +31,6 @@ def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
 
-# ---------- NEW: Switzerland hard filter ----------
 SWITZERLAND_RE = re.compile(
     r"\b(switzerland|schweiz|zürich|zurich|basel|bern|genf|geneva|"
     r"luzern|lausanne|winterthur|st\.?\s*gallen|ch-)\b",
@@ -42,6 +41,11 @@ def is_switzerland(location):
     return bool(SWITZERLAND_RE.search(location or ""))
 
 # ---------- Hard reject titles ----------
+# NOTE: "experte|spezialist" below BLOCKS thesis-relevant roles like
+#       "Prüfmittel Spezialist", "FAIR Data Specialist", "Messtechnik Spezialist".
+#       The new domain-specific rejects (compliance, kyc, aml, data steward,
+#       stammdaten) already catch the bad ones. Delete that line for the
+#       laser-sharp version.
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -49,7 +53,7 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"senior|sr|lead|head.?of|director|vp|chief|principal|staff|"
     r"managing.?director|geschäftsführer|leitung|führungskraft|"
     r"teamleiter|teamleiterin|projektleiter|"
-    r"experte|spezialist|"
+    r"experte|spezialist|"                                # <-- delete this line to unblock Prüfmittel/FAIR specialists
     r"developer|entwickler|full.?stack|fullstack|"
     r"backend|back.?end|frontend|front.?end|devops|site.?reliability|"
     r"cloud.?engineer|mobile.?developer|ios.?developer|android.?developer|"
@@ -69,12 +73,23 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"systemadministrator|system.?administrator|it.?systemadmin|"
     r"generalist|generalistin|recruiter|recruiting|"
     r"pflege|nursing|krankenpflege|"
-    r"gastronomie|restaurant|hotel|kellner|koch|küche"
+    r"gastronomie|restaurant|hotel|kellner|koch|küche|"
+    # NEW: financial crime / compliance / data governance — reject at TITLE level
+    r"kyc|aml|geldwäsche|geldwaesche|"
+    r"compliance|compliance.?manager|compliance.?analyst|"
+    r"bankkaufmann|bankkauffrau|banking.?operations|"
+    r"data.?steward|data.?governance|data.?quality|"
+    r"master.?data|stammdaten|stammdatenmanagement|"
+    r"sanctions|transaction.?monitoring|financial.?crime|"
+    r"audit\w*|revision\w*|"
+    r"datenschutz\w*|data.?protection|"
+    r"risk.?management|risikomanagement|"
+    r"regulator\w*"
     r")\b",
     re.IGNORECASE,
 )
 
-# ---------- Hard reject body (FIXED mehrjährige + mindestens patterns) ----------
+# ---------- Hard reject body ----------
 HARD_REJECT_BODY_RE = re.compile(
     r"\b("
     r"c1|c2|verhandlungssicher|muttersprache|"
@@ -91,7 +106,7 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- NEW: Entry-level signals (searched in JD body) ----------
+# ---------- Entry-level signals ----------
 ENTRY_LEVEL_PHRASES = [
     "berufseinsteiger", "berufseinsteigerin", "berufseinsteigerinnen",
     "berufseinsteiger:innen", "berufseinsteiger*innen",
@@ -131,7 +146,6 @@ ENTRY_LEVEL_PHRASES = [
     "1 jahr erfahrung", "1 jahr berufserfahrung",
 ]
 
-# ---------- NEW: Mid-level penalty (soft, not elimination) ----------
 MID_LEVEL_PENALTY_RE = re.compile(
     r"("
     r"erfahrene[rn]?\s+(?:persönlichkeit|fachkraft|ingenieur|entwickler|mitarbeiter)|"
@@ -144,31 +158,67 @@ MID_LEVEL_PENALTY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- TIER 1 ----------
-TIER1 = [
-    "systemintegration", "system integration", "system engineer", "systems engineer",
-    "schnittstelle", "schnittstellen", "interface", "hardware",
-    "messtechnik", "measurement", "sensor", "prüfstand", "teststand",
-    "test engineer", "testingenieur", "test automation", "software tester",
-    "testautomatisierung", "prüfmittel", "qualitätssicherung",
-    "automatisierung", "automation", "cobot", "robotics", "roboter",
+# ---------- TIER1_STRONG: at least ONE must match to survive ----------
+TIER1_STRONG = [
+    # Test / Prüfmittel
+    "testingenieur", "test engineer", "test automation", "testautomatisierung",
+    "prüfmittel", "prüfmittelentwickler", "prüfmittelplaner", "prüfingenieur",
+    "prüfstand", "teststand", "prüfstandsentwickler",
+    "testapplikation", "test system", "testsystem",
+    "qualitätssicherung", "quality assurance",
+    "produktprüfung", "produkttest",
+    # Measurement / Messtechnik
+    "messtechnik", "messtechniker", "measurement engineer", "measurement system",
+    "kalibrierung", "calibration", "kalibriertechniker", "kalibrieringenieur",
+    "sensorintegration", "sensor integration",
+    "messsystem", "messstation", "prüflabor",
+    # System integration
+    "systemintegration", "system integration", "systemintegrator",
+    "schnittstelle", "schnittstellen", "interface",
+    "inbetriebnahme", "commissioning",
+    "hardware-software", "hardware software", "hardware/software",
+    "hardware integration", "hardware-integration",
+    # Lab automation (thesis-specific)
+    "laborautomation", "laborautomatisierung", "lab automation",
+    "laboratory automation", "lab automation engineer",
+    "pyironflow", "workflow automation", "workflow system",
+    "elektrochemie", "electrochemistry", "electrochemical",
+    "potentiostat", "palmsens",
+    "material acceleration", "self-driving lab", "self driving lab",
+    "laborinformatik", "lab informatics",
+    "labor digitalisierung", "lab digitalization",
+    "labor 4.0", "lab 4.0",
+    # Cobot / Robotics
+    "cobot", "kollaborativer roboter", "collaborative robot",
+    "omron", "tm5", "tmflow",
+    "robotik", "robotics", "roboter",
+    "wellenmessung", "shaft measurement",
+    "imbus", "imb-io",
+    "induktive messung", "inductive probe",
+    # Automation
+    "automatisierung", "automation", "automatisierungsingenieur",
+    # Technical writing
     "technischer redakteur", "technical writer", "technische dokumentation",
     "technical documentation", "din iso", "din en iso",
-    "industrialingenieur", "industrial engineer", "wirtschaftsingenieur", "wirtschaftsingenieurwesen",
-    "python", "api", "rest",
-    "json-ld", "jsonld", "json ld",
-    "docker", "git",
-    "measurement system", "positioning system", "positioning",
-    "hardware-software", "hardware software", "hardware/software",
-    "omron", "tm5", "tm5-900",
-    "sensor integration",
-    "serial communication", "serial interface",
-    "rest api", "restapi",
-    "data pipeline", "datenpipeline",
-    "metadata", "metadaten",
-    "fair data", "fair-data", "research data", "forschungsdaten",
-    "forschungsdatenmanagement",
+    # Requirements
+    "requirements engineer", "anforderungsanalyse", "anforderungsmanagement",
+    # FAIR / provenance (engineering context only)
+    "json-ld", "jsonld", "provenance", "prov-o", "opmw", "ro-crate",
+    "fair data", "fair-data", "research data management", "forschungsdaten",
+    "forschungsdatenmanagement", "metadata", "metadaten",
 ]
+
+# ---------- TIER1_WEAK: boost only, never the sole reason to keep ----------
+TIER1_WEAK = [
+    "python", "api", "rest", "rest api", "docker", "git",
+    "sql", "linux", "jupyter", "csv",
+    "data pipeline", "datenpipeline",
+    "prozess", "process",
+    "projekt", "project",
+]
+
+# Kept as alias so any other reference still works
+TIER1 = TIER1_STRONG + TIER1_WEAK
 
 TIER2 = [
     "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
@@ -182,29 +232,38 @@ TIER2 = [
 MAX_SCORE = 15
 MIN_MATCH = 50
 
+# ---------- CV_SUMMARY updated to match the real thesis ----------
 CV_SUMMARY = """
 M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen, Grade 1.9), TH Rosenheim.
 B.Tech Mechanical Engineering.
 
-BAM Berlin Master's Thesis (Technical):
-Developed a modular Python application to automate a measurement and positioning system.
-Integrated hardware (sensors, measurement devices) with software via REST APIs and serial communication.
-Built data pipelines, handled JSON-LD metadata, and used Docker/Git for testing and documentation.
+BAM Berlin Master's Thesis: "Visual Programming Workflow for Electrochemical Automation"
+- Developed a node-based automation workflow in PyironFlow (Python) for electrochemical measurements.
+- Integrated Ender3 positioning unit with PalmSens potentiostat via serial communication and REST APIs.
+- Built calibration and validation routines: positional accuracy, timing, data integrity.
+- Implemented FAIR data handling: JSON-LD metadata, PROV-O / OPMW provenance, RO-Crate.
+- Used Docker/Git for reproducible test environments.
 
-Cobot Project:
-Programmed an Omron TM5-900 collaborative robot, integrating sensors, pneumatics, and digital I/O.
+Cobot Project (Omron TM5-900 at TH Rosenheim):
+- Automated shaft measurement system integration: inductive probes, IMBus I/O modules, digital I/O.
+- Designed custom workpiece carriers and gripper jaws via additive manufacturing.
+- Programmed cobot, integrated sensors, pneumatics; built calibration routine (every 100 parts / 1 hour).
 
 Professional Experience:
-6 years at Federal Bank. Focused on requirements analysis, project coordination, and system rollouts.
+6 years at Federal Bank: requirements analysis, project coordination, system rollouts, regulated documentation.
 
 Languages: English C1, German B2. Work permit Section 18b.
 """
 
 THESIS_KEYWORDS = [
-    "json-ld", "jsonld", "docker", "git", "python",
-    "rest api", "rest", "serial", "measurement", "messtechnik",
-    "positioning", "sensor", "hardware", "cobot", "omron", "tm5",
-    "data pipeline", "metadata", "api", "interface", "schnittstelle",
+    "pyironflow", "electrochemical", "potentiostat", "palmsens", "ender3",
+    "json-ld", "prov-o", "opmw", "ro-crate", "fair data",
+    "workflow automation", "lab automation", "laboratory automation",
+    "docker", "python", "rest api", "serial",
+    "measurement", "messtechnik", "calibration", "kalibrierung",
+    "validation", "positioning", "sensor", "hardware",
+    "cobot", "omron", "tm5", "imbus", "inductive probe",
+    "shaft measurement", "wellenmessung",
 ]
 
 ENGLISH_PRIMARY_RE = re.compile(
@@ -249,11 +308,30 @@ def fetch_arbeitnow():
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
     queries = [
-        "Systemintegration", "Testingenieur", "Messtechnik",
-        "Automatisierung Ingenieur", "Technischer Redakteur",
-        "System Integration Engineer", "Test Engineer", "Automation Engineer",
-        "Research Data", "FAIR data", "Metadata", "Python Engineer",
-        "Requirements Engineer", "Hardware Software Integration",
+        # Thesis-relevant German
+        "Laborautomation", "Laborautomatisierung", "Automatisierungsingenieur",
+        "Prüfmittelentwickler", "Prüfmittelplaner", "Prüfingenieur",
+        "Testingenieur", "Messtechnik Ingenieur", "Messtechniker",
+        "Kalibriertechniker", "Kalibrieringenieur",
+        "Systemintegrator", "Systemintegration", "Inbetriebnahmeingenieur",
+        "Applikationsentwickler Messtechnik", "Prüfstandsentwickler",
+        "Versuchsingenieur", "Softwareentwickler Mess- und Prüftechnik",
+        "Laborinformatiker",
+        # Thesis-relevant English
+        "Lab Automation Engineer", "Laboratory Automation Engineer",
+        "Test Engineer", "Test Automation Engineer",
+        "Measurement Engineer", "Calibration Engineer",
+        "System Integration Engineer", "Commissioning Engineer",
+        "Application Engineer Measurement", "Test Bench Developer",
+        "Scientific Software Developer", "Research Data Engineer",
+        "Workflow Developer", "Requirements Engineer",
+        # Thesis-specific research terms
+        "PyironFlow", "electrochemical automation", "potentiostat",
+        "FAIR data", "JSON-LD", "PROV-O", "metadata",
+        "research data management", "Material Acceleration Platform",
+        # Cobot-specific
+        "cobot", "collaborative robot", "Omron TM5", "TMFlow",
+        "IMBus", "Wellenmessung", "Prüfmittel", "Messstation",
     ]
     jobs = []
     seen = set()
@@ -314,7 +392,13 @@ def fetch_bundesagentur():
 def fetch_academics_de():
     jobs = []
     seen_urls = set()
-    queries = ["FAIR data", "research data management", "metadata", "Python data", "data engineer"]
+    queries = [
+        "Lab Automation", "Laboratory Automation", "FAIR data",
+        "research data management", "metadata", "PyironFlow",
+        "electrochemical", "Python data", "data engineer",
+        "workflow automation", "scientific software",
+        "measurement automation", "laboratory informatics",
+    ]
     headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
 
     for q in queries:
@@ -388,7 +472,9 @@ def fetch_euraxess():
         "https://www.euraxess.ba/sr/services/jobs/rss",
         "euraxess",
         default_location="Germany / Austria / EU",
-        title_filter=["germany", "austria", "deutschland", "österreich", "data", "engineer", "research"],
+        title_filter=["germany", "austria", "deutschland", "österreich",
+                      "data", "engineer", "research", "automation",
+                      "laboratory", "measurement", "electrochemical"],
     )
 
 
@@ -397,7 +483,8 @@ def fetch_weworkremotely():
         "https://weworkremotely.com/categories/remote-programming-jobs.rss",
         "weworkremotely",
         default_location="Remote",
-        title_filter=["python", "engineer", "integration", "test", "automation", "data", "api"],
+        title_filter=["python", "engineer", "integration", "test", "automation",
+                      "data", "api", "lab", "workflow"],
     )
 
 
@@ -406,7 +493,8 @@ def fetch_remotive():
         "https://remotive.com/remote-jobs/feed/engineering",
         "remotive",
         default_location="Remote",
-        title_filter=["python", "engineer", "integration", "test", "automation", "data", "api"],
+        title_filter=["python", "engineer", "integration", "test", "automation",
+                      "data", "api", "lab", "workflow"],
     )
 
 
@@ -415,7 +503,8 @@ def fetch_berlinstartupjobs():
         "https://berlinstartupjobs.com/feed/",
         "berlinstartupjobs",
         default_location="Berlin, Germany",
-        title_filter=["python", "engineer", "integration", "test", "automation", "data", "api", "technical"],
+        title_filter=["python", "engineer", "integration", "test", "automation",
+                      "data", "api", "technical", "lab"],
     )
 
 
@@ -436,7 +525,8 @@ def fetch_kowi():
             if any(k in tl for k in [
                 "helmholtz", "leibniz", "fraunhofer", "postdoc", "phd",
                 "research", "scientist", "engineer", "data", "python",
-                "doktorand", "wissenschaft",
+                "doktorand", "wissenschaft", "automation", "laboratory",
+                "measurement", "electrochemical", "workflow",
             ]):
                 jobs.append({
                     "title": title,
@@ -455,7 +545,9 @@ def fetch_kowi():
 def fetch_jobriver():
     jobs = []
     seen = set()
-    queries = ["systemintegration", "testingenieur", "automatisierung", "python", "messtechnik", "daten"]
+    queries = ["systemintegration", "testingenieur", "automatisierung",
+               "python", "messtechnik", "daten", "laborautomation",
+               "prüfmittel", "kalibrierung"]
     headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
     try:
         for q in queries:
@@ -586,16 +678,20 @@ SCORING EXAMPLES (PURE TECHNICAL FOCUS):
 - "System Integration Engineer" (Hardware/Software) = 90
 - "Test Engineer / Testingenieur" (Automation, Python) = 85
 - "Messtechnik / Measurement Engineer" = 85
+- "Lab Automation Engineer" (Python, workflow) = 90
+- "Electrochemical / Potentiostat Automation Engineer" = 90
 - "Automation Engineer / Automatisierungsingenieur" (Cobot) = 80
 - "Research Data / FAIR Data / Metadata Engineer" = 80
+- "Scientific Software Developer" (Python, workflow) = 85
 - "Technical Writer" (Engineering, DIN/ISO) = 75
 - "Requirements Engineer" = 70
 - "Prozessmanager" in IT or Engineering = 60
 - "Berufseinsteiger / Trainee / Hochschulabsolvent / Graduate role" (technical fit) = 85
 
 NOT A FIT (0-25 ONLY, NEVER HIGHER):
-- KYC / AML / Compliance / Bankkaufmann = 0 (Candidate is pivoting away)
-- Data Steward / Master Data / SAP Stammdaten = 10 (Not technical enough)
+- KYC / AML / Compliance / Bankkaufmann / Financial Crime / Sanctions = 0 (NEVER above 0, regardless of title)
+- Data Steward / Data Governance / Master Data / SAP Stammdaten / Data Quality = 0 (NEVER above 0)
+- Audit / Revision / Risk Management / Regulatory = 5
 - Sales / Account Manager / Account Executive = 5
 - Full Stack / Backend / Frontend / DevOps = 5
 - Senior / Lead / Head of / Director = 0
@@ -614,6 +710,7 @@ Low-level manual testing or basic Excel data entry = 20 max.
 Entry-level / Berufseinsteiger / Trainee / Hochschulabsolvent roles = boost by +10.
 Roles requiring 3+ years experience = cap at 40.
 "Mehrjährige Berufserfahrung" or "mindestens 3 Jahre" = cap at 30.
+If the title contains "Compliance", "KYC", "AML", "Data Steward", "Master Data", "Stammdaten", "Governance", "Audit", or "Risk" = return 0 immediately, no exceptions.
 
 Answer:"""
 
@@ -678,7 +775,7 @@ def score_gemini(job):
 def rank_and_filter(jobs):
     out = []
     seen = set()
-    stats = {"title": 0, "body": 0, "no_tier1": 0, "kept": 0}
+    stats = {"title": 0, "body": 0, "no_strong": 0, "kept": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -690,22 +787,36 @@ def rank_and_filter(jobs):
         bl = job["description"].lower()
         body_head = bl[:400]
 
+        # 1) hard reject on title (now catches compliance/KYC/data steward)
         if HARD_REJECT_TITLE_RE.search(tl):
             stats["title"] += 1
             continue
+        # 2) hard reject on body (empty body does NOT trigger)
         if HARD_REJECT_BODY_RE.search(bl):
             stats["body"] += 1
             continue
 
-        t1_title = sum(1 for p in TIER1 if p in tl)
-        t1_head = sum(1 for p in TIER1 if p in body_head)
-        t1_body = sum(1 for p in TIER1 if p in bl)
-        if t1_title == 0 and t1_head == 0:
-            stats["no_tier1"] += 1
+        # 3) require at least ONE strong term in title or body_head
+        #    (empty descriptions therefore must have a strong term in the title)
+        strong_title = sum(1 for p in TIER1_STRONG if p in tl)
+        strong_head = sum(1 for p in TIER1_STRONG if p in body_head)
+        strong_body = sum(1 for p in TIER1_STRONG if p in bl)
+
+        if strong_title == 0 and strong_head == 0:
+            stats["no_strong"] += 1
             continue
 
+        # 4) weak terms only boost, never qualify
+        weak_title = sum(1 for p in TIER1_WEAK if p in tl)
+        weak_head = sum(1 for p in TIER1_WEAK if p in body_head)
+        weak_body = sum(1 for p in TIER1_WEAK if p in bl)
+
         t2 = sum(1 for p in TIER2 if p in (tl + " " + body_head))
-        rank = 10 * t1_title + 3 * t1_head + 1 * t1_body + 1 * t2
+        rank = (
+            10 * strong_title + 6 * strong_head + 2 * strong_body
+            + 2 * weak_title + 1 * weak_head + 1 * weak_body
+            + 1 * t2
+        )
 
         if ENGLISH_PRIMARY_RE.search(bl):
             rank += 5
@@ -716,7 +827,6 @@ def rank_and_filter(jobs):
                                   "jobs_daheim", "englishjobs", "germantechjobs"):
             rank += 4
 
-        # Entry-level boost / mid-level penalty
         entry_hits = sum(1 for phrase in ENTRY_LEVEL_PHRASES if phrase in bl)
         if entry_hits:
             rank += min(entry_hits * 3, 15)
@@ -734,7 +844,7 @@ def rank_and_filter(jobs):
     out.sort(key=lambda x: x[0], reverse=True)
     print(f"Rejected (title): {stats['title']}")
     print(f"Rejected (body): {stats['body']}")
-    print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1']}")
+    print(f"Rejected (no STRONG term): {stats['no_strong']}")
     print(f"Surviving: {stats['kept']}")
     return [x[1] for x in out]
 
