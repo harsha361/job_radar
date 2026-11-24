@@ -2,6 +2,7 @@ import os
 import re
 import time
 import requests
+from urllib.parse import quote
 from google import genai
 from groq import Groq
 
@@ -29,7 +30,6 @@ def is_dach(location):
     return any(c in loc for c in DACH_CITIES)
 
 # ---------- Hard reject titles ----------
-# Still blocking pure software devs, sales, and seniors.
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -77,23 +77,37 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- TIER 1: Pure Technical Engineering ----------
+# ---------- TIER 1: Pure Technical Engineering + Thesis + Research data ----------
 TIER1 = [
-    # Hardware/Software Integration
+    # Hardware/Software Integration (existing)
     "systemintegration", "system integration", "system engineer", "systems engineer",
     "schnittstelle", "schnittstellen", "interface", "hardware",
     "messtechnik", "measurement", "sensor", "prüfstand", "teststand",
-    # Testing
+    # Testing (existing)
     "test engineer", "testingenieur", "test automation", "software tester",
     "testautomatisierung", "prüfmittel", "qualitätssicherung",
-    # Automation / Robotics
+    # Automation / Robotics (existing)
     "automatisierung", "automation", "cobot", "robotics", "roboter",
-    # Tech Writing / Documentation
-    "technischer redakteur", "technical writer", "technische dokumentation", 
+    # Tech Writing / Documentation (existing)
+    "technischer redakteur", "technical writer", "technische dokumentation",
     "technical documentation", "din iso", "din en iso",
-    # Engineering / Python
+    # Engineering / Python (existing)
     "industrialingenieur", "industrial engineer", "wirtschaftsingenieur", "wirtschaftsingenieurwesen",
-    "python", "api", "rest"
+    "python", "api", "rest",
+    # --- NEW: thesis-specific technical terms ---
+    "json-ld", "jsonld", "json ld",
+    "docker", "git",
+    "measurement system", "positioning system", "positioning",
+    "hardware-software", "hardware software", "hardware/software",
+    "omron", "tm5", "tm5-900",
+    "sensor integration",
+    "serial communication", "serial interface",
+    "rest api", "restapi",
+    "data pipeline", "datenpipeline",
+    "metadata", "metadaten",
+    # --- NEW: research-data lane ---
+    "fair data", "fair-data", "research data", "forschungsdaten",
+    "forschungsdatenmanagement",
 ]
 
 # ---------- TIER 2: Soft signals ----------
@@ -109,7 +123,6 @@ TIER2 = [
 MAX_SCORE = 15
 MIN_MATCH = 50
 
-# ---------- NEW CV SUMMARY (Focus on BAM Thesis & Cobot) ----------
 CV_SUMMARY = """
 M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen, Grade 1.9), TH Rosenheim.
 B.Tech Mechanical Engineering.
@@ -127,6 +140,29 @@ Professional Experience:
 
 Languages: English C1, German B2. Work permit Section 18b.
 """
+
+# ---------- NEW: thesis keywords for Telegram fit line ----------
+THESIS_KEYWORDS = [
+    "json-ld", "jsonld", "docker", "git", "python",
+    "rest api", "rest", "serial", "measurement", "messtechnik",
+    "positioning", "sensor", "hardware", "cobot", "omron", "tm5",
+    "data pipeline", "metadata", "api", "interface", "schnittstelle",
+]
+
+# ---------- NEW: language-primary detection ----------
+ENGLISH_PRIMARY_RE = re.compile(
+    r"\b(english.?speaking|english.?working.?language|"
+    r"working.?language.?english|project.?language.?english|"
+    r"fluent.?english|business.?english|english.?required|"
+    r"very.?good.?english|excellent.?english)\b",
+    re.IGNORECASE,
+)
+
+GERMAN_ONLY_RE = re.compile(
+    r"\b(deutschkenntnisse|german.?language|deutsch.?erforderlich|"
+    r"sehr.?gute.?deutsch|gute.?deutsch)\b",
+    re.IGNORECASE,
+)
 
 groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_KEY)
@@ -151,9 +187,15 @@ def fetch_arbeitnow():
 
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
-    # QUERIES: System Integration, Test, Measurement, Technical Writer
-    queries = ["Systemintegration", "Testingenieur", "Messtechnik", 
-               "Automatisierung Ingenieur", "Technischer Redakteur"]
+    queries = [
+        # --- Existing German queries (kept) ---
+        "Systemintegration", "Testingenieur", "Messtechnik",
+        "Automatisierung Ingenieur", "Technischer Redakteur",
+        # --- NEW English queries ---
+        "System Integration Engineer", "Test Engineer", "Automation Engineer",
+        "Research Data", "FAIR data", "Metadata", "Python Engineer",
+        "Requirements Engineer", "Hardware Software Integration",
+    ]
     jobs = []
     seen = set()
 
@@ -210,7 +252,53 @@ def fetch_bundesagentur():
     return jobs
 
 
+def fetch_academics_de():
+    """NEW: best-effort scrape of academics.de for research-data / FAIR roles."""
+    jobs = []
+    seen_urls = set()
+    queries = ["FAIR data", "research data management", "metadata", "Python data", "data engineer"]
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
+
+    for q in queries:
+        try:
+            url = f"https://www.academics.de/jobs?q={quote(q)}"
+            r = requests.get(url, headers=headers, timeout=20)
+            if r.status_code != 200:
+                print(f"  academics.de '{q}': HTTP {r.status_code}")
+                continue
+
+            links = re.findall(r'href="(/jobs/[^"#?]+)"', r.text)
+            print(f"  academics.de '{q}': {len(links)} links")
+
+            for link in links:
+                # only keep detail pages (slug ends with numeric id)
+                if not re.search(r'-\d{4,}$', link):
+                    continue
+                if link in seen_urls:
+                    continue
+                seen_urls.add(link)
+
+                slug = link.split("/jobs/")[-1]
+                title = re.sub(r'-\d+$', '', slug).replace('-', ' ').replace('/', ' ').title().strip()
+                if not title or len(title) < 5:
+                    continue
+
+                jobs.append({
+                    "title": title,
+                    "company": "academics.de",
+                    "location": "Germany",
+                    "description": "",
+                    "url": f"https://www.academics.de{link}",
+                    "source": "academics_de",
+                })
+        except Exception as e:
+            print(f"  academics.de '{q}' exception: {e}")
+
+    return jobs
+
+
 def build_prompt(job):
+    desc = job['description'][:2500] if job['description'].strip() else "(not available - score based on title, company, location)"
     return f"""Score this job 0-100 for the candidate. Return ONLY the integer.
 
 CANDIDATE:
@@ -219,13 +307,14 @@ CANDIDATE:
 JOB:
 Title: {job['title']}
 Location: {job['location']}
-Description: {job['description'][:2500]}
+Description: {desc}
 
 SCORING EXAMPLES (PURE TECHNICAL FOCUS):
 - "System Integration Engineer" (Hardware/Software) = 90
 - "Test Engineer / Testingenieur" (Automation, Python) = 85
 - "Messtechnik / Measurement Engineer" = 85
 - "Automation Engineer / Automatisierungsingenieur" (Cobot) = 80
+- "Research Data / FAIR Data / Metadata Engineer" = 80
 - "Technical Writer" (Engineering, DIN/ISO) = 75
 - "Requirements Engineer" = 70
 - "Prozessmanager" in IT or Engineering = 60
@@ -245,6 +334,7 @@ RULES:
 Software developer roles (Java, C#, React) = 15 max.
 Any Senior/Lead/Head/Director title = 0-15.
 C1 German required = cap at 40.
+B2 German required but NOT English-primary = cap at 65.
 More than 3 years experience required = cap at 50.
 Low-level manual testing or basic Excel data entry = 20 max.
 
@@ -332,12 +422,23 @@ def rank_and_filter(jobs):
 
         t1_title = sum(1 for p in TIER1 if p in tl)
         t1_head = sum(1 for p in TIER1 if p in body_head)
+        t1_body = sum(1 for p in TIER1 if p in bl)
         if t1_title == 0 and t1_head == 0:
             stats["no_tier1"] += 1
             continue
 
         t2 = sum(1 for p in TIER2 if p in (tl + " " + body_head))
-        rank = 10 * t1_title + 3 * t1_head + 1 * t2
+        rank = 10 * t1_title + 3 * t1_head + 1 * t1_body + 1 * t2
+
+        # NEW: English-primary boost / German-only penalty
+        if ENGLISH_PRIMARY_RE.search(bl):
+            rank += 5
+        if GERMAN_ONLY_RE.search(bl) and not ENGLISH_PRIMARY_RE.search(bl):
+            rank -= 3
+        # NEW: research-source boost
+        if job.get("source") == "academics_de":
+            rank += 4
+
         stats["kept"] += 1
         out.append((rank, job))
 
@@ -347,6 +448,14 @@ def rank_and_filter(jobs):
     print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1']}")
     print(f"Surviving: {stats['kept']}")
     return [x[1] for x in out]
+
+
+def thesis_fit_line(job):
+    text = (job["title"] + " " + job["description"]).lower()
+    hits = [kw for kw in THESIS_KEYWORDS if kw in text]
+    if not hits:
+        return ""
+    return "🔬 Thesis fit: " + ", ".join(hits[:4])
 
 
 def send_tg(text):
@@ -365,10 +474,11 @@ def main():
     print("=== Fetching ===")
     arbeitnow_raw = fetch_arbeitnow()
     ba_raw = fetch_bundesagentur()
+    academics_raw = fetch_academics_de()  # NEW
 
     arbeitnow_dach = [j for j in arbeitnow_raw if is_dach(j["location"])]
-    
-    all_jobs = arbeitnow_dach + ba_raw
+
+    all_jobs = arbeitnow_dach + ba_raw + academics_raw
     print(f"Total usable: {len(all_jobs)}\n")
 
     candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
@@ -395,12 +505,17 @@ def main():
         send_tg(f"🎯 Job Radar: 0 matches above {MIN_MATCH}% ({len(candidates)} scored).")
         return
 
+    source_label = {"arbeitnow": "arbeitnow", "bundesagentur": "BA", "academics_de": "academics.de"}
     lines = [f"<b>🎯 Job Radar — {len(matches)} matches</b>"]
     for m in matches:
-        lines.append(
+        line = (
             f"<b>{m['pct']}%</b> — <a href=\"{m['url']}\">{m['title']}</a>\n"
-            f"{m['company']} · {m['location']}"
+            f"{m['company']} · {m['location']} · {source_label.get(m['source'], m['source'])}"
         )
+        fit = thesis_fit_line(m)
+        if fit:
+            line += f"\n{fit}"
+        lines.append(line)
     send_tg("\n\n".join(lines))
 
 
