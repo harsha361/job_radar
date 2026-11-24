@@ -2,6 +2,7 @@ import os
 import re
 import time
 import requests
+import xml.etree.ElementTree as ET
 from urllib.parse import quote
 from google import genai
 from groq import Groq
@@ -23,6 +24,7 @@ DACH_CITIES = [
     "verl", "gütersloh", "guetersloh", "espelkamp",
     "österreich", "austria", "wien", "vienna", "graz", "linz",
     "salzburg", "innsbruck", "klagenfurt",
+    "switzerland", "schweiz", "zürich", "zurich", "basel", "bern", "genf", "geneva",
 ]
 
 def is_dach(location):
@@ -77,24 +79,18 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- TIER 1: Pure Technical Engineering + Thesis + Research data ----------
+# ---------- TIER 1 ----------
 TIER1 = [
-    # Hardware/Software Integration (existing)
     "systemintegration", "system integration", "system engineer", "systems engineer",
     "schnittstelle", "schnittstellen", "interface", "hardware",
     "messtechnik", "measurement", "sensor", "prüfstand", "teststand",
-    # Testing (existing)
     "test engineer", "testingenieur", "test automation", "software tester",
     "testautomatisierung", "prüfmittel", "qualitätssicherung",
-    # Automation / Robotics (existing)
     "automatisierung", "automation", "cobot", "robotics", "roboter",
-    # Tech Writing / Documentation (existing)
     "technischer redakteur", "technical writer", "technische dokumentation",
     "technical documentation", "din iso", "din en iso",
-    # Engineering / Python (existing)
     "industrialingenieur", "industrial engineer", "wirtschaftsingenieur", "wirtschaftsingenieurwesen",
     "python", "api", "rest",
-    # --- NEW: thesis-specific technical terms ---
     "json-ld", "jsonld", "json ld",
     "docker", "git",
     "measurement system", "positioning system", "positioning",
@@ -105,12 +101,10 @@ TIER1 = [
     "rest api", "restapi",
     "data pipeline", "datenpipeline",
     "metadata", "metadaten",
-    # --- NEW: research-data lane ---
     "fair data", "fair-data", "research data", "forschungsdaten",
     "forschungsdatenmanagement",
 ]
 
-# ---------- TIER 2: Soft signals ----------
 TIER2 = [
     "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
     "absolvent", "junior", "trainee", "graduate",
@@ -141,7 +135,6 @@ Professional Experience:
 Languages: English C1, German B2. Work permit Section 18b.
 """
 
-# ---------- NEW: thesis keywords for Telegram fit line ----------
 THESIS_KEYWORDS = [
     "json-ld", "jsonld", "docker", "git", "python",
     "rest api", "rest", "serial", "measurement", "messtechnik",
@@ -149,7 +142,6 @@ THESIS_KEYWORDS = [
     "data pipeline", "metadata", "api", "interface", "schnittstelle",
 ]
 
-# ---------- NEW: language-primary detection ----------
 ENGLISH_PRIMARY_RE = re.compile(
     r"\b(english.?speaking|english.?working.?language|"
     r"working.?language.?english|project.?language.?english|"
@@ -167,6 +159,10 @@ GERMAN_ONLY_RE = re.compile(
 groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_KEY)
 
+
+# ============================================================
+# EXISTING FETCHERS (kept)
+# ============================================================
 
 def fetch_arbeitnow():
     try:
@@ -188,10 +184,8 @@ def fetch_arbeitnow():
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
     queries = [
-        # --- Existing German queries (kept) ---
         "Systemintegration", "Testingenieur", "Messtechnik",
         "Automatisierung Ingenieur", "Technischer Redakteur",
-        # --- NEW English queries ---
         "System Integration Engineer", "Test Engineer", "Automation Engineer",
         "Research Data", "FAIR data", "Metadata", "Python Engineer",
         "Requirements Engineer", "Hardware Software Integration",
@@ -253,7 +247,6 @@ def fetch_bundesagentur():
 
 
 def fetch_academics_de():
-    """NEW: best-effort scrape of academics.de for research-data / FAIR roles."""
     jobs = []
     seen_urls = set()
     queries = ["FAIR data", "research data management", "metadata", "Python data", "data engineer"]
@@ -271,7 +264,6 @@ def fetch_academics_de():
             print(f"  academics.de '{q}': {len(links)} links")
 
             for link in links:
-                # only keep detail pages (slug ends with numeric id)
                 if not re.search(r'-\d{4,}$', link):
                     continue
                 if link in seen_urls:
@@ -296,6 +288,236 @@ def fetch_academics_de():
 
     return jobs
 
+
+# ============================================================
+# NEW FREE FETCHERS (no paid API, no token)
+# ============================================================
+
+def _parse_rss(url, source_name, default_location="Germany / Remote", title_filter=None):
+    """Generic RSS parser used for EURAXESS, WWR, Remotive, BerlinStartupJobs."""
+    jobs = []
+    try:
+        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        root = ET.fromstring(r.content)
+        for item in root.findall(".//item"):
+            title = item.findtext("title", "").strip()
+            link = item.findtext("link", "").strip()
+            desc = item.findtext("description", "").strip()
+            if not title or not link:
+                continue
+            combined = (title + " " + desc).lower()
+            if title_filter and not any(k in combined for k in title_filter):
+                continue
+            jobs.append({
+                "title": title,
+                "company": source_name,
+                "location": default_location,
+                "description": desc,
+                "url": link,
+                "source": source_name,
+            })
+        print(f"  {source_name}: {len(jobs)}")
+    except Exception as e:
+        print(f"  {source_name} exception: {e}")
+    return jobs
+
+
+def fetch_euraxess():
+    """RSS feed for EU research jobs (DE/AT/EU)."""
+    return _parse_rss(
+        "https://www.euraxess.ba/sr/services/jobs/rss",
+        "euraxess",
+        default_location="Germany / Austria / EU",
+        title_filter=["germany", "austria", "deutschland", "österreich", "data", "engineer", "research"],
+    )
+
+
+def fetch_weworkremotely():
+    """RSS for We Work Remotely – programming category."""
+    return _parse_rss(
+        "https://weworkremotely.com/categories/remote-programming-jobs.rss",
+        "weworkremotely",
+        default_location="Remote",
+        title_filter=["python", "engineer", "integration", "test", "automation", "data", "api"],
+    )
+
+
+def fetch_remotive():
+    """RSS for Remotive – engineering category."""
+    return _parse_rss(
+        "https://remotive.com/remote-jobs/feed/engineering",
+        "remotive",
+        default_location="Remote",
+        title_filter=["python", "engineer", "integration", "test", "automation", "data", "api"],
+    )
+
+
+def fetch_berlinstartupjobs():
+    """RSS for BerlinStartupJobs – English-heavy startup roles."""
+    return _parse_rss(
+        "https://berlinstartupjobs.com/feed/",
+        "berlinstartupjobs",
+        default_location="Berlin, Germany",
+        title_filter=["python", "engineer", "integration", "test", "automation", "data", "api", "technical"],
+    )
+
+
+def fetch_kowi():
+    """KoWi central research-institute listings (Helmholtz, Leibniz, Fraunhofer)."""
+    jobs = []
+    try:
+        r = requests.get(
+            "https://www.kowi.de/desktopdefault.aspx/tabid-111/",
+            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        r.raise_for_status()
+        for m in re.finditer(r'\[([^\]]{10,180})\]\(([^)]+)\)', r.text):
+            title = m.group(1).strip()
+            url = m.group(2).strip()
+            if not url.startswith("http"):
+                url = "https://www.kowi.de" + url
+            tl = title.lower()
+            if any(k in tl for k in [
+                "helmholtz", "leibniz", "fraunhofer", "postdoc", "phd",
+                "research", "scientist", "engineer", "data", "python",
+                "doktorand", "wissenschaft",
+            ]):
+                jobs.append({
+                    "title": title,
+                    "company": "Research institute (KoWi)",
+                    "location": "Germany / Austria",
+                    "description": "",
+                    "url": url,
+                    "source": "kowi",
+                })
+        print(f"  KoWi: {len(jobs)}")
+    except Exception as e:
+        print(f"  KoWi exception: {e}")
+    return jobs
+
+
+def fetch_jobriver():
+    """JOBRIVER – German IT-specialist board, lower crowded than StepStone."""
+    jobs = []
+    seen = set()
+    queries = ["systemintegration", "testingenieur", "automatisierung", "python", "messtechnik", "daten"]
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
+    try:
+        for q in queries:
+            r = requests.get(f"https://jobriver.de/jobs?q={quote(q)}", headers=headers, timeout=20)
+            if r.status_code != 200:
+                continue
+            for m in re.finditer(r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
+                path = m.group(1)
+                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not title or len(title) < 5 or path in seen:
+                    continue
+                seen.add(path)
+                jobs.append({
+                    "title": title,
+                    "company": "JOBRIVER",
+                    "location": "Germany",
+                    "description": "",
+                    "url": f"https://jobriver.de{path}",
+                    "source": "jobriver",
+                })
+        print(f"  JOBRIVER: {len(jobs)}")
+    except Exception as e:
+        print(f"  JOBRIVER exception: {e}")
+    return jobs
+
+
+def fetch_jobs_daheim():
+    """Jobs-Daheim.de – remote-friendly DACH roles."""
+    jobs = []
+    try:
+        r = requests.get(
+            "https://jobs-daheim.de/",
+            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code == 200:
+            for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
+                href = m.group(1)
+                inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if "/job/" in href and 5 < len(inner) < 140:
+                    jobs.append({
+                        "title": inner,
+                        "company": "Jobs-Daheim",
+                        "location": "DACH (remote)",
+                        "description": "",
+                        "url": href if href.startswith("http") else "https://jobs-daheim.de" + href,
+                        "source": "jobs_daheim",
+                    })
+        print(f"  Jobs-Daheim: {len(jobs)}")
+    except Exception as e:
+        print(f"  Jobs-Daheim exception: {e}")
+    return jobs
+
+
+def fetch_englishjobs():
+    """EnglishJobs.de – English-only roles in Germany."""
+    jobs = []
+    seen = set()
+    try:
+        r = requests.get(
+            "https://englishjobs.de/",
+            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code == 200:
+            for m in re.finditer(r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
+                path = m.group(1)
+                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not title or len(title) < 5 or path in seen:
+                    continue
+                seen.add(path)
+                jobs.append({
+                    "title": title,
+                    "company": "EnglishJobs.de",
+                    "location": "Germany",
+                    "description": "",
+                    "url": f"https://englishjobs.de{path}",
+                    "source": "englishjobs",
+                })
+        print(f"  EnglishJobs: {len(jobs)}")
+    except Exception as e:
+        print(f"  EnglishJobs exception: {e}")
+    return jobs
+
+
+def fetch_germantechjobs():
+    """GermanTechJobs – English-heavy tech roles in Germany."""
+    jobs = []
+    seen = set()
+    try:
+        r = requests.get(
+            "https://germantechjobs.de/en",
+            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
+        )
+        if r.status_code == 200:
+            for m in re.finditer(r'href="(/en/jobs/[^"#?]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
+                path = m.group(1)
+                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not title or len(title) < 5 or path in seen:
+                    continue
+                seen.add(path)
+                jobs.append({
+                    "title": title,
+                    "company": "GermanTechJobs",
+                    "location": "Germany",
+                    "description": "",
+                    "url": f"https://germantechjobs.de{path}",
+                    "source": "germantechjobs",
+                })
+        print(f"  GermanTechJobs: {len(jobs)}")
+    except Exception as e:
+        print(f"  GermanTechJobs exception: {e}")
+    return jobs
+
+
+# ============================================================
+# SCORING / FILTERING (kept)
+# ============================================================
 
 def build_prompt(job):
     desc = job['description'][:2500] if job['description'].strip() else "(not available - score based on title, company, location)"
@@ -430,13 +652,14 @@ def rank_and_filter(jobs):
         t2 = sum(1 for p in TIER2 if p in (tl + " " + body_head))
         rank = 10 * t1_title + 3 * t1_head + 1 * t1_body + 1 * t2
 
-        # NEW: English-primary boost / German-only penalty
         if ENGLISH_PRIMARY_RE.search(bl):
             rank += 5
         if GERMAN_ONLY_RE.search(bl) and not ENGLISH_PRIMARY_RE.search(bl):
             rank -= 3
-        # NEW: research-source boost
-        if job.get("source") == "academics_de":
+
+        # Free niche-source boosts (less crowded = higher priority)
+        if job.get("source") in ("academics_de", "kowi", "euraxess", "jobriver",
+                                  "jobs_daheim", "englishjobs", "germantechjobs"):
             rank += 4
 
         stats["kept"] += 1
@@ -470,15 +693,33 @@ def send_tg(text):
         print(f"Telegram error: {e}")
 
 
+# ============================================================
+# MAIN — all free sources, no paid APIs
+# ============================================================
+
 def main():
-    print("=== Fetching ===")
-    arbeitnow_raw = fetch_arbeitnow()
-    ba_raw = fetch_bundesagentur()
-    academics_raw = fetch_academics_de()  # NEW
+    print("=== Fetching (free sources only) ===")
+    arbeitnow_raw   = fetch_arbeitnow()
+    ba_raw          = fetch_bundesagentur()
+    academics_raw   = fetch_academics_de()
+    kowi_raw        = fetch_kowi()
+    euraxess_raw    = fetch_euraxess()
+    wwr_raw         = fetch_weworkremotely()
+    remotive_raw    = fetch_remotive()
+    berlin_raw      = fetch_berlinstartupjobs()
+    jobriver_raw    = fetch_jobriver()
+    daheim_raw      = fetch_jobs_daheim()
+    englishjobs_raw = fetch_englishjobs()
+    germantech_raw  = fetch_germantechjobs()
 
     arbeitnow_dach = [j for j in arbeitnow_raw if is_dach(j["location"])]
 
-    all_jobs = arbeitnow_dach + ba_raw + academics_raw
+    all_jobs = (
+        arbeitnow_dach + ba_raw + academics_raw
+        + kowi_raw + euraxess_raw + wwr_raw + remotive_raw
+        + berlin_raw + jobriver_raw + daheim_raw
+        + englishjobs_raw + germantech_raw
+    )
     print(f"Total usable: {len(all_jobs)}\n")
 
     candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
@@ -505,7 +746,21 @@ def main():
         send_tg(f"🎯 Job Radar: 0 matches above {MIN_MATCH}% ({len(candidates)} scored).")
         return
 
-    source_label = {"arbeitnow": "arbeitnow", "bundesagentur": "BA", "academics_de": "academics.de"}
+    source_label = {
+        "arbeitnow": "arbeitnow",
+        "bundesagentur": "BA",
+        "academics_de": "academics.de",
+        "kowi": "KoWi",
+        "euraxess": "EURAXESS",
+        "weworkremotely": "WWR",
+        "remotive": "Remotive",
+        "berlinstartupjobs": "BerlinStartupJobs",
+        "jobriver": "JOBRIVER",
+        "jobs_daheim": "Jobs-Daheim",
+        "englishjobs": "EnglishJobs.de",
+        "germantechjobs": "GermanTechJobs",
+    }
+
     lines = [f"<b>🎯 Job Radar — {len(matches)} matches</b>"]
     for m in matches:
         line = (
