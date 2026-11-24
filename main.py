@@ -83,9 +83,14 @@ HARD_REJECT_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# ---------- Hard reject body ----------
+# NOTE (Option B): "verhandlungssicher" REMOVED from this regex.
+# It is now a soft penalty (VERHANDLUNGSSICHER_RE + rank -10) so that
+# entry-level postings that use it as boilerplate (like Kärcher) survive.
+# Explicit "c1|c2" remains a hard reject.
 HARD_REJECT_BODY_RE = re.compile(
     r"\b("
-    r"c1|c2|verhandlungssicher|muttersprache|"
+    r"c1|c2|muttersprache|"
     r"fließend.?deutsch|fliessend.?deutsch|"
     r"native.?german|deutsch.?als.?muttersprache|"
     r"mehrjährige\s*(?:berufs)?erfahrung|mehrjaehrige\s*(?:berufs)?erfahrung|"
@@ -99,7 +104,13 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- Entry-level signals (searched in JD body) ----------
+# ---------- NEW (Option B): soft penalty for "verhandlungssicher" ----------
+VERHANDLUNGSSICHER_RE = re.compile(
+    r"\b(verhandlungssicher\w*|verhandlungssichere[rn]?)\b",
+    re.IGNORECASE,
+)
+
+# ---------- Entry-level signals ----------
 ENTRY_LEVEL_PHRASES = [
     "berufseinsteiger", "berufseinsteigerin", "berufseinsteigerinnen",
     "berufseinsteiger:innen", "berufseinsteiger*innen",
@@ -142,7 +153,6 @@ ENTRY_LEVEL_PHRASES = [
     "1 jahr erfahrung", "1 jahr berufserfahrung",
 ]
 
-# Title-level entry signals (strongest)
 ENTRY_TITLE_TERMS = [
     "junior", "trainee", "absolvent", "einsteiger", "graduate",
     "berufseinsteiger", "hochschulabsolvent", "entry level", "entry-level",
@@ -172,6 +182,7 @@ TIER1_STRONG = [
     "produktprüfung", "produkttest",
     # Measurement / Messtechnik
     "messtechnik", "messtechniker", "measurement engineer", "measurement system",
+    "messingenieur",                                   # NEW (Option B)
     "kalibrierung", "calibration", "kalibriertechniker", "kalibrieringenieur",
     "sensorintegration", "sensor integration",
     "messsystem", "messstation", "prüflabor",
@@ -233,7 +244,6 @@ TIER2 = [
 MAX_SCORE = 15
 MIN_MATCH = 50
 
-# NEW: of MAX_SCORE slots, guarantee this many for non-entry-level jobs
 ENTRY_RESERVE_NON_ENTRY = 4
 
 CV_SUMMARY = """
@@ -314,6 +324,7 @@ def fetch_bundesagentur():
         "Laborautomation", "Laborautomatisierung", "Automatisierungsingenieur",
         "Prüfmittelentwickler", "Prüfmittelplaner", "Prüfingenieur",
         "Testingenieur", "Messtechnik Ingenieur", "Messtechniker",
+        "Messingenieur",                                # NEW (Option B)
         "Kalibriertechniker", "Kalibrieringenieur",
         "Systemintegrator", "Systemintegration", "Inbetriebnahmeingenieur",
         "Applikationsentwickler Messtechnik", "Prüfstandsentwickler",
@@ -546,7 +557,7 @@ def fetch_jobriver():
     seen = set()
     queries = ["systemintegration", "testingenieur", "automatisierung",
                "python", "messtechnik", "daten", "laborautomation",
-               "prüfmittel", "kalibrierung"]
+               "prüfmittel", "kalibrierung", "messingenieur"]
     headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
     try:
         for q in queries:
@@ -677,6 +688,7 @@ SCORING EXAMPLES (PURE TECHNICAL FOCUS):
 - "System Integration Engineer" (Hardware/Software) = 90
 - "Test Engineer / Testingenieur" (Automation, Python) = 85
 - "Messtechnik / Measurement Engineer" = 85
+- "Messingenieur" (Measurement Engineer) = 85
 - "Lab Automation Engineer" (Python, workflow) = 90
 - "Electrochemical / Potentiostat Automation Engineer" = 90
 - "Automation Engineer / Automatisierungsingenieur" (Cobot) = 80
@@ -703,6 +715,7 @@ RULES:
 Software developer roles (Java, C#, React) = 15 max.
 Any Senior/Lead/Head/Director title = 0-15.
 C1 German required = cap at 40.
+Verhandlungssichere Deutschkenntnisse = cap at 55 (soft penalty; do not zero out if the role is otherwise entry-level).
 B2 German required but NOT English-primary = cap at 65.
 More than 3 years experience required = cap at 50.
 Low-level manual testing or basic Excel data entry = 20 max.
@@ -776,15 +789,13 @@ def score_gemini(job):
 # ============================================================
 
 def entry_level_flag(tl, bl):
-    """Return (is_entry_level, hits). Entry-level if title has a strong term
-    or the body contains at least one entry-level phrase."""
     title_hit = any(k in tl for k in ENTRY_TITLE_TERMS)
     body_hits = sum(1 for phrase in ENTRY_LEVEL_PHRASES if phrase in bl)
     return (title_hit or body_hits > 0), body_hits
 
 
 def rank_and_filter(jobs):
-    entry_pool = []   # (rank, job)
+    entry_pool = []
     other_pool = []
     seen = set()
     stats = {"title": 0, "body": 0, "no_strong": 0, "kept": 0,
@@ -831,13 +842,16 @@ def rank_and_filter(jobs):
         if GERMAN_ONLY_RE.search(bl) and not ENGLISH_PRIMARY_RE.search(bl):
             rank -= 3
 
+        # NEW (Option B): "verhandlungssicher" is a soft penalty, not a hard reject
+        if VERHANDLUNGSSICHER_RE.search(bl):
+            rank -= 10
+
         if job.get("source") in ("academics_de", "kowi", "euraxess", "jobriver",
                                   "jobs_daheim", "englishjobs", "germantechjobs"):
             rank += 4
 
         is_entry, entry_hits = entry_level_flag(tl, bl)
 
-        # Stronger numeric boost so entry-level jobs also order well inside their bucket
         if entry_hits:
             rank += min(entry_hits * 5, 30)
         if any(k in tl for k in ENTRY_TITLE_TERMS):
@@ -857,14 +871,13 @@ def rank_and_filter(jobs):
     entry_pool.sort(key=lambda x: x[0], reverse=True)
     other_pool.sort(key=lambda x: x[0], reverse=True)
 
-    # ---- Reserve logic: entry-level fills first, non-entry keeps a floor ----
     cap_entry = max(MAX_SCORE - ENTRY_RESERVE_NON_ENTRY, 1)
     take_entry = entry_pool[:cap_entry]
     remaining_slots = MAX_SCORE - len(take_entry)
     take_other = other_pool[:remaining_slots]
 
     selected = take_entry + take_other
-    selected.sort(key=lambda x: x[0], reverse=True)  # highest rank first for scoring
+    selected.sort(key=lambda x: x[0], reverse=True)
 
     print(f"Rejected (title): {stats['title']}")
     print(f"Rejected (body): {stats['body']}")
@@ -927,7 +940,6 @@ def main():
     all_jobs = [j for j in all_jobs if not is_switzerland(j.get("location", ""))]
     print(f"Total usable: {len(all_jobs)}\n")
 
-    # rank_and_filter already selects entry-first with a non-entry reserve
     candidates = rank_and_filter(all_jobs)
     print(f"\nWill score: {len(candidates)}\n")
 
