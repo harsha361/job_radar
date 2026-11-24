@@ -41,11 +41,6 @@ def is_switzerland(location):
     return bool(SWITZERLAND_RE.search(location or ""))
 
 # ---------- Hard reject titles ----------
-# NOTE: "experte|spezialist" below BLOCKS thesis-relevant roles like
-#       "Prüfmittel Spezialist", "FAIR Data Specialist", "Messtechnik Spezialist".
-#       The new domain-specific rejects (compliance, kyc, aml, data steward,
-#       stammdaten) already catch the bad ones. Delete that line for the
-#       laser-sharp version.
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -53,7 +48,7 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"senior|sr|lead|head.?of|director|vp|chief|principal|staff|"
     r"managing.?director|geschäftsführer|leitung|führungskraft|"
     r"teamleiter|teamleiterin|projektleiter|"
-    r"experte|spezialist|"                                # <-- delete this line to unblock Prüfmittel/FAIR specialists
+    r"experte|spezialist|"
     r"developer|entwickler|full.?stack|fullstack|"
     r"backend|back.?end|frontend|front.?end|devops|site.?reliability|"
     r"cloud.?engineer|mobile.?developer|ios.?developer|android.?developer|"
@@ -74,7 +69,6 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"generalist|generalistin|recruiter|recruiting|"
     r"pflege|nursing|krankenpflege|"
     r"gastronomie|restaurant|hotel|kellner|koch|küche|"
-    # NEW: financial crime / compliance / data governance — reject at TITLE level
     r"kyc|aml|geldwäsche|geldwaesche|"
     r"compliance|compliance.?manager|compliance.?analyst|"
     r"bankkaufmann|bankkauffrau|banking.?operations|"
@@ -89,7 +83,6 @@ HARD_REJECT_TITLE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- Hard reject body ----------
 HARD_REJECT_BODY_RE = re.compile(
     r"\b("
     r"c1|c2|verhandlungssicher|muttersprache|"
@@ -106,11 +99,11 @@ HARD_REJECT_BODY_RE = re.compile(
     re.IGNORECASE,
 )
 
-# ---------- Entry-level signals ----------
+# ---------- Entry-level signals (searched in JD body) ----------
 ENTRY_LEVEL_PHRASES = [
     "berufseinsteiger", "berufseinsteigerin", "berufseinsteigerinnen",
     "berufseinsteiger:innen", "berufseinsteiger*innen",
-    "berufseinstieg",
+    "berufseinstieg", "einstiegsposition", "einstiegsstelle",
     "berufsanfänger", "berufsanfaenger", "berufsanfängerin", "berufsanfängerinnen",
     "berufsanfänger:innen", "berufsanfänger*innen",
     "hochschulabsolvent", "hochschulabsolventen", "hochschulabsolventin",
@@ -118,12 +111,14 @@ ENTRY_LEVEL_PHRASES = [
     "absolvent", "absolventen", "absolventin", "absolventinnen",
     "absolvent:innen", "absolvent*innen",
     "trainee", "traineeprogramm", "trainee-programm", "trainee programm",
-    "graduate", "graduates",
+    "graduate", "graduates", "entry level", "entry-level",
+    "young professional", "young professionals",
     "einsteiger", "einsteigerin", "einsteigerinnen", "einsteiger:innen",
     "junior", "juniorstelle", "junior-stelle",
     "quereinsteiger", "quereinsteigerin", "quereinsteigerinnen",
     "quereinsteiger:innen", "quereinsteiger*innen", "quereinstieg",
     "keine berufserfahrung", "ohne berufserfahrung",
+    "keine berufserfahrung erforderlich",
     "keine vorkenntnisse", "ohne vorkenntnisse",
     "erfahrung ist egal", "berufserfahrung ist egal", "erfahrung egal",
     "erfahrung: egal", "berufserfahrung: egal",
@@ -134,6 +129,7 @@ ENTRY_LEVEL_PHRASES = [
     "berufseinsteiger sind auch willkommen",
     "berufseinsteiger:innen sind auch willkommen",
     "auch berufseinsteiger:innen willkommen",
+    "auch als berufseinsteiger", "auch als berufseinsteigerin",
     "auch ohne berufserfahrung", "auch ohne erfahrung",
     "auch quereinsteiger willkommen", "quereinsteiger willkommen",
     "auch quereinsteiger:innen willkommen",
@@ -144,6 +140,13 @@ ENTRY_LEVEL_PHRASES = [
     "maximal 2 jahre", "maximal 3 jahre",
     "erste berufserfahrung", "erste erfahrung", "erste praktische erfahrung",
     "1 jahr erfahrung", "1 jahr berufserfahrung",
+]
+
+# Title-level entry signals (strongest)
+ENTRY_TITLE_TERMS = [
+    "junior", "trainee", "absolvent", "einsteiger", "graduate",
+    "berufseinsteiger", "hochschulabsolvent", "entry level", "entry-level",
+    "young professional", "quereinsteiger",
 ]
 
 MID_LEVEL_PENALTY_RE = re.compile(
@@ -208,7 +211,6 @@ TIER1_STRONG = [
     "forschungsdatenmanagement", "metadata", "metadaten",
 ]
 
-# ---------- TIER1_WEAK: boost only, never the sole reason to keep ----------
 TIER1_WEAK = [
     "python", "api", "rest", "rest api", "docker", "git",
     "sql", "linux", "jupyter", "csv",
@@ -217,7 +219,6 @@ TIER1_WEAK = [
     "projekt", "project",
 ]
 
-# Kept as alias so any other reference still works
 TIER1 = TIER1_STRONG + TIER1_WEAK
 
 TIER2 = [
@@ -232,7 +233,9 @@ TIER2 = [
 MAX_SCORE = 15
 MIN_MATCH = 50
 
-# ---------- CV_SUMMARY updated to match the real thesis ----------
+# NEW: of MAX_SCORE slots, guarantee this many for non-entry-level jobs
+ENTRY_RESERVE_NON_ENTRY = 4
+
 CV_SUMMARY = """
 M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen, Grade 1.9), TH Rosenheim.
 B.Tech Mechanical Engineering.
@@ -308,7 +311,6 @@ def fetch_arbeitnow():
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
     queries = [
-        # Thesis-relevant German
         "Laborautomation", "Laborautomatisierung", "Automatisierungsingenieur",
         "Prüfmittelentwickler", "Prüfmittelplaner", "Prüfingenieur",
         "Testingenieur", "Messtechnik Ingenieur", "Messtechniker",
@@ -317,7 +319,6 @@ def fetch_bundesagentur():
         "Applikationsentwickler Messtechnik", "Prüfstandsentwickler",
         "Versuchsingenieur", "Softwareentwickler Mess- und Prüftechnik",
         "Laborinformatiker",
-        # Thesis-relevant English
         "Lab Automation Engineer", "Laboratory Automation Engineer",
         "Test Engineer", "Test Automation Engineer",
         "Measurement Engineer", "Calibration Engineer",
@@ -325,11 +326,9 @@ def fetch_bundesagentur():
         "Application Engineer Measurement", "Test Bench Developer",
         "Scientific Software Developer", "Research Data Engineer",
         "Workflow Developer", "Requirements Engineer",
-        # Thesis-specific research terms
         "PyironFlow", "electrochemical automation", "potentiostat",
         "FAIR data", "JSON-LD", "PROV-O", "metadata",
         "research data management", "Material Acceleration Platform",
-        # Cobot-specific
         "cobot", "collaborative robot", "Omron TM5", "TMFlow",
         "IMBus", "Wellenmessung", "Prüfmittel", "Messstation",
     ]
@@ -772,10 +771,24 @@ def score_gemini(job):
     return None
 
 
+# ============================================================
+# RANKING — entry-level first, reserve for non-entry-level
+# ============================================================
+
+def entry_level_flag(tl, bl):
+    """Return (is_entry_level, hits). Entry-level if title has a strong term
+    or the body contains at least one entry-level phrase."""
+    title_hit = any(k in tl for k in ENTRY_TITLE_TERMS)
+    body_hits = sum(1 for phrase in ENTRY_LEVEL_PHRASES if phrase in bl)
+    return (title_hit or body_hits > 0), body_hits
+
+
 def rank_and_filter(jobs):
-    out = []
+    entry_pool = []   # (rank, job)
+    other_pool = []
     seen = set()
-    stats = {"title": 0, "body": 0, "no_strong": 0, "kept": 0}
+    stats = {"title": 0, "body": 0, "no_strong": 0, "kept": 0,
+             "entry": 0, "other": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -787,17 +800,13 @@ def rank_and_filter(jobs):
         bl = job["description"].lower()
         body_head = bl[:400]
 
-        # 1) hard reject on title (now catches compliance/KYC/data steward)
         if HARD_REJECT_TITLE_RE.search(tl):
             stats["title"] += 1
             continue
-        # 2) hard reject on body (empty body does NOT trigger)
         if HARD_REJECT_BODY_RE.search(bl):
             stats["body"] += 1
             continue
 
-        # 3) require at least ONE strong term in title or body_head
-        #    (empty descriptions therefore must have a strong term in the title)
         strong_title = sum(1 for p in TIER1_STRONG if p in tl)
         strong_head = sum(1 for p in TIER1_STRONG if p in body_head)
         strong_body = sum(1 for p in TIER1_STRONG if p in bl)
@@ -806,7 +815,6 @@ def rank_and_filter(jobs):
             stats["no_strong"] += 1
             continue
 
-        # 4) weak terms only boost, never qualify
         weak_title = sum(1 for p in TIER1_WEAK if p in tl)
         weak_head = sum(1 for p in TIER1_WEAK if p in body_head)
         weak_body = sum(1 for p in TIER1_WEAK if p in bl)
@@ -827,26 +835,45 @@ def rank_and_filter(jobs):
                                   "jobs_daheim", "englishjobs", "germantechjobs"):
             rank += 4
 
-        entry_hits = sum(1 for phrase in ENTRY_LEVEL_PHRASES if phrase in bl)
-        if entry_hits:
-            rank += min(entry_hits * 3, 15)
+        is_entry, entry_hits = entry_level_flag(tl, bl)
 
-        if any(k in tl for k in ["junior", "trainee", "absolvent", "einsteiger",
-                                  "graduate", "berufseinsteiger", "hochschulabsolvent"]):
-            rank += 5
+        # Stronger numeric boost so entry-level jobs also order well inside their bucket
+        if entry_hits:
+            rank += min(entry_hits * 5, 30)
+        if any(k in tl for k in ENTRY_TITLE_TERMS):
+            rank += 15
 
         if MID_LEVEL_PENALTY_RE.search(bl):
             rank -= 5
 
         stats["kept"] += 1
-        out.append((rank, job))
+        if is_entry:
+            stats["entry"] += 1
+            entry_pool.append((rank, job))
+        else:
+            stats["other"] += 1
+            other_pool.append((rank, job))
 
-    out.sort(key=lambda x: x[0], reverse=True)
+    entry_pool.sort(key=lambda x: x[0], reverse=True)
+    other_pool.sort(key=lambda x: x[0], reverse=True)
+
+    # ---- Reserve logic: entry-level fills first, non-entry keeps a floor ----
+    cap_entry = max(MAX_SCORE - ENTRY_RESERVE_NON_ENTRY, 1)
+    take_entry = entry_pool[:cap_entry]
+    remaining_slots = MAX_SCORE - len(take_entry)
+    take_other = other_pool[:remaining_slots]
+
+    selected = take_entry + take_other
+    selected.sort(key=lambda x: x[0], reverse=True)  # highest rank first for scoring
+
     print(f"Rejected (title): {stats['title']}")
     print(f"Rejected (body): {stats['body']}")
     print(f"Rejected (no STRONG term): {stats['no_strong']}")
-    print(f"Surviving: {stats['kept']}")
-    return [x[1] for x in out]
+    print(f"Surviving: {stats['kept']} (entry-level: {stats['entry']}, other: {stats['other']})")
+    print(f"Selected for scoring: {len(selected)} "
+          f"(entry-level: {len(take_entry)}, non-entry reserved: {len(take_other)})")
+
+    return [j for _, j in selected]
 
 
 def thesis_fit_line(job):
@@ -897,11 +924,11 @@ def main():
         + englishjobs_raw + germantech_raw
     )
 
-    # Switzerland removed
     all_jobs = [j for j in all_jobs if not is_switzerland(j.get("location", ""))]
     print(f"Total usable: {len(all_jobs)}\n")
 
-    candidates = rank_and_filter(all_jobs)[:MAX_SCORE]
+    # rank_and_filter already selects entry-first with a non-entry reserve
+    candidates = rank_and_filter(all_jobs)
     print(f"\nWill score: {len(candidates)}\n")
 
     matches = []
