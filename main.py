@@ -28,7 +28,8 @@ def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
 
-
+# ---------- Hard reject titles ----------
+# Still blocking pure software devs, sales, and seniors.
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -37,11 +38,10 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"managing.?director|geschäftsführer|leitung|führungskraft|"
     r"teamleiter|teamleiterin|projektleiter|"
     r"experte|spezialist|"
-    r"developer|entwickler|software.?engineer|full.?stack|fullstack|"
+    r"developer|entwickler|full.?stack|fullstack|"
     r"backend|back.?end|frontend|front.?end|devops|site.?reliability|"
     r"cloud.?engineer|mobile.?developer|ios.?developer|android.?developer|"
-    r"data.?engineer|machine.?learning|ml.?engineer|ml.?ops|"
-    r"ai.?engineer|platform.?engineer|infrastructure.?engineer|"
+    r"machine.?learning|ml.?engineer|ml.?ops|ai.?engineer|platform.?engineer|"
     r"engineering.?manager|product.?manager|program.?manager|"
     r"account.?manager|account.?executive|sales.?manager|"
     r"marketing.?manager|hr.?manager|hr.?generalist|it.?manager|"
@@ -70,55 +70,61 @@ HARD_REJECT_BODY_RE = re.compile(
     r"mehrjährige.?erfahrung|mehrjaehrige.?erfahrung|"
     r"mindestens.?\d.?jahre|"
     r"französisch|french|spanisch|italienisch|niederländisch|"
-    r"maternity.?cover|temporary.?contract|befristet.?auf"
+    r"maternity.?cover|temporary.?contract|befristet.?auf|"
+    r"kyc|aml|geldwäsche|compliance|bankkaufmann|bankkauffrau|"
+    r"data steward|master data|stammdaten"
     r")\b",
     re.IGNORECASE,
 )
 
-# Prozessmanager only counts if the body has a finance/compliance context
-PROZESS_DOMAIN = [
-    "bank", "finanz", "compliance", "kyc", "geldwäsche", "geldwaesche",
-    "aml", "regulatorik", "reporting", "zahlungsverkehr", "zahlung",
-    "wertpapier", "kredit", "versicherung", "meldewesen", "aufsicht",
-    "risk", "risiko", "treasury", "accounting", "rechnung",
-]
-
+# ---------- TIER 1: Pure Technical Engineering ----------
 TIER1 = [
-    "kyc", "know your customer", "compliance", "aml",
-    "anti money laundering", "anti-money laundering",
-    "geldwäsche", "geldwaesche", "sanction", "sanktion",
-    "due diligence", "sorgfaltspflicht",
-    "regulatory reporting", "meldewesen", "regulatorik",
-    "prozessmanager", "prozessmanagement", "prozessanalyse",
-    "prozessoptimierung", "process manager", "process management",
-    "data steward", "research data", "forschungsdaten", "fair data",
-    "data management", "datenmanagement", "metadaten", "metadata",
-    "data governance", "data quality", "datenqualität",
-    "requirements engineer", "requirements analysis", "anforderungsmanager",
-    "technical writer", "technischer redakteur", "technische dokumentation",
+    # Hardware/Software Integration
+    "systemintegration", "system integration", "system engineer", "systems engineer",
+    "schnittstelle", "schnittstellen", "interface", "hardware",
+    "messtechnik", "measurement", "sensor", "prüfstand", "teststand",
+    # Testing
+    "test engineer", "testingenieur", "test automation", "software tester",
+    "testautomatisierung", "prüfmittel", "qualitätssicherung",
+    # Automation / Robotics
+    "automatisierung", "automation", "cobot", "robotics", "roboter",
+    # Tech Writing / Documentation
+    "technischer redakteur", "technical writer", "technische dokumentation", 
+    "technical documentation", "din iso", "din en iso",
+    # Engineering / Python
+    "industrialingenieur", "industrial engineer", "wirtschaftsingenieur", "wirtschaftsingenieurwesen",
+    "python", "api", "rest"
 ]
 
+# ---------- TIER 2: Soft signals ----------
 TIER2 = [
     "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
     "absolvent", "junior", "trainee", "graduate",
-    "prozess", "requirements", "anforderung",
+    "prozess", "process", "projekt", "project",
     "dokumentation", "documentation",
-    "reporting", "kpi", "zahlungsabwicklung", "payment",
-    "reconciliation", "forderungsmanagement",
     "testing", "validierung", "quality assurance",
-    "integration", "schnittstelle", "api",
+    "ingenieur", "engineer", "mint"
 ]
 
 MAX_SCORE = 15
 MIN_MATCH = 50
 
+# ---------- NEW CV SUMMARY (Focus on BAM Thesis & Cobot) ----------
 CV_SUMMARY = """
-M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen), TH Rosenheim.
-6 years Federal Bank India: KYC, due diligence, payment reconciliation,
-compliance controls, requirements analysis, process analysis, reporting,
-project coordination, user training.
-BAM Berlin thesis: Python, data pipelines, REST APIs, JSON-LD, FAIR data,
-metadata, Docker, testing, DIN/ISO documentation.
+M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen, Grade 1.9), TH Rosenheim.
+B.Tech Mechanical Engineering.
+
+BAM Berlin Master's Thesis (Technical):
+Developed a modular Python application to automate a measurement and positioning system.
+Integrated hardware (sensors, measurement devices) with software via REST APIs and serial communication.
+Built data pipelines, handled JSON-LD metadata, and used Docker/Git for testing and documentation.
+
+Cobot Project:
+Programmed an Omron TM5-900 collaborative robot, integrating sensors, pneumatics, and digital I/O.
+
+Professional Experience:
+6 years at Federal Bank. Focused on requirements analysis, project coordination, and system rollouts.
+
 Languages: English C1, German B2. Work permit Section 18b.
 """
 
@@ -128,12 +134,8 @@ gemini_client = genai.Client(api_key=GEMINI_KEY)
 
 def fetch_arbeitnow():
     try:
-        r = requests.get(
-            "https://www.arbeitnow.com/api/job-board-api",
-            timeout=30,
-        )
+        r = requests.get("https://www.arbeitnow.com/api/job-board-api", timeout=30)
         r.raise_for_status()
-        data = r.json().get("data", [])
         return [{
             "title": j.get("title", ""),
             "company": j.get("company_name", ""),
@@ -141,7 +143,7 @@ def fetch_arbeitnow():
             "description": j.get("description", ""),
             "url": j.get("url", ""),
             "source": "arbeitnow",
-        } for j in data]
+        } for j in r.json().get("data", [])]
     except Exception as e:
         print(f"Arbeitnow error: {e}")
         return []
@@ -149,8 +151,9 @@ def fetch_arbeitnow():
 
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
-    queries = ["KYC Compliance", "Prozessmanager", "Data Steward",
-               "Regulatory Reporting", "Geldwäsche"]
+    # QUERIES: System Integration, Test, Measurement, Technical Writer
+    queries = ["Systemintegration", "Testingenieur", "Messtechnik", 
+               "Automatisierung Ingenieur", "Technischer Redakteur"]
     jobs = []
     seen = set()
 
@@ -162,7 +165,6 @@ def fetch_bundesagentur():
                 headers=headers, params=params, timeout=30,
             )
             if r.status_code != 200:
-                print(f"  BA '{q}': HTTP {r.status_code}, skipped")
                 continue
 
             data = r.json()
@@ -173,14 +175,7 @@ def fetch_bundesagentur():
                 if not isinstance(j, dict):
                     continue
 
-                # Title from the correct field names
-                t = (
-                    j.get("stellenangebotsTitel")
-                    or j.get("titel")
-                    or j.get("beruf")
-                    or j.get("hauptberuf")
-                    or ""
-                )
+                t = j.get("stellenangebotsTitel") or j.get("titel") or j.get("beruf") or ""
                 if not isinstance(t, str):
                     t = ""
                 t = t.strip()
@@ -188,7 +183,6 @@ def fetch_bundesagentur():
                     continue
                 seen.add(t)
 
-                # Location from stellenlokationen[0].adresse.ort
                 loc = ""
                 lok = j.get("stellenlokationen")
                 if isinstance(lok, list) and lok:
@@ -202,19 +196,14 @@ def fetch_bundesagentur():
                 if not isinstance(desc, str):
                     desc = ""
 
-                company = j.get("firma") or j.get("arbeitgeber") or ""
-
-                ref = j.get("referenznummer") or j.get("refnr") or ""
-
                 jobs.append({
                     "title": t,
-                    "company": company,
+                    "company": j.get("firma") or j.get("arbeitgeber") or "",
                     "location": loc or "Germany",
                     "description": desc,
-                    "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{ref}",
+                    "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('referenznummer','')}",
                     "source": "bundesagentur",
                 })
-
         except Exception as e:
             print(f"  BA '{q}' exception: {e}")
 
@@ -232,35 +221,32 @@ Title: {job['title']}
 Location: {job['location']}
 Description: {job['description'][:2500]}
 
-SCORING EXAMPLES:
-- "KYC Analyst" entry-level, English OK = 85
-- "Junior Compliance Manager", "Berufseinsteiger willkommen" = 80
-- "Data Steward" research institute = 75
-- "Technical Writer" engineering = 65
-- "Prozessmanager" finance/banking domain, 0-2 years = 65
-- "Prozessmanager" 3+ years required = 50
-- "Integration and Test Engineer" 0-2 years = 55
+SCORING EXAMPLES (PURE TECHNICAL FOCUS):
+- "System Integration Engineer" (Hardware/Software) = 90
+- "Test Engineer / Testingenieur" (Automation, Python) = 85
+- "Messtechnik / Measurement Engineer" = 85
+- "Automation Engineer / Automatisierungsingenieur" (Cobot) = 80
+- "Technical Writer" (Engineering, DIN/ISO) = 75
+- "Requirements Engineer" = 70
+- "Prozessmanager" in IT or Engineering = 60
 
 NOT A FIT (0-25 ONLY, NEVER HIGHER):
-- Experte / Spezialist with 3+ years experience = 20
-- Customer Success, Kundendienst, Kundenbetreuung = 15
+- KYC / AML / Compliance / Bankkaufmann = 0 (Candidate is pivoting away)
+- Data Steward / Master Data / SAP Stammdaten = 10 (Not technical enough)
 - Sales / Account Manager / Account Executive = 5
 - Full Stack / Backend / Frontend / DevOps = 5
 - Senior / Lead / Head of / Director = 0
 - Controller / FP&A / Accounting = 15
 - UI/UX / Designer = 5
-- IT-Systemadministrator / System Engineer = 25
+- IT-Systemadministrator / Network Admin = 25
 - HR Generalist / Recruiter = 5
-- Quantitative Researcher = 10
-- Prozessmanager in production/defence/manufacturing = 25
-- Any role requiring French/Spanish/Italian/Dutch = 0
 
 RULES:
-Software developer/engineer roles: 5-15 max.
-Any Senior/Lead/Head/Director title: 0-15.
-C1 German required: cap 40.
-More than 2 years experience required: cap 50.
-Low-level backoffice without compliance/process content: 15-30.
+Software developer roles (Java, C#, React) = 15 max.
+Any Senior/Lead/Head/Director title = 0-15.
+C1 German required = cap at 40.
+More than 3 years experience required = cap at 50.
+Low-level manual testing or basic Excel data entry = 20 max.
 
 Answer:"""
 
@@ -325,7 +311,7 @@ def score_gemini(job):
 def rank_and_filter(jobs):
     out = []
     seen = set()
-    stats = {"title": 0, "body": 0, "no_tier1": 0, "prozess_domain": 0, "kept": 0}
+    stats = {"title": 0, "body": 0, "no_tier1": 0, "kept": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -337,24 +323,13 @@ def rank_and_filter(jobs):
         bl = job["description"].lower()
         body_head = bl[:400]
 
-        # Title hard reject
         if HARD_REJECT_TITLE_RE.search(tl):
             stats["title"] += 1
             continue
-
-        # Body hard reject
         if HARD_REJECT_BODY_RE.search(bl):
             stats["body"] += 1
             continue
 
-        # Prozessmanager requires finance/compliance domain in the body
-        if ("prozessmanager" in tl or "prozessmanagement" in tl
-                or "prozessmanager" in body_head):
-            if not any(d in bl for d in PROZESS_DOMAIN):
-                stats["prozess_domain"] += 1
-                continue
-
-        # TIER1 must be in title or in first 400 chars of body
         t1_title = sum(1 for p in TIER1 if p in tl)
         t1_head = sum(1 for p in TIER1 if p in body_head)
         if t1_title == 0 and t1_head == 0:
@@ -369,7 +344,6 @@ def rank_and_filter(jobs):
     out.sort(key=lambda x: x[0], reverse=True)
     print(f"Rejected (title): {stats['title']}")
     print(f"Rejected (body): {stats['body']}")
-    print(f"Rejected (Prozessmanager wrong domain): {stats['prozess_domain']}")
     print(f"Rejected (no TIER1 in title/lead): {stats['no_tier1']}")
     print(f"Surviving: {stats['kept']}")
     return [x[1] for x in out]
@@ -390,15 +364,10 @@ def send_tg(text):
 def main():
     print("=== Fetching ===")
     arbeitnow_raw = fetch_arbeitnow()
-    print(f"Arbeitnow raw: {len(arbeitnow_raw)}")
-
-    print("\n=== Bundesagentur ===")
     ba_raw = fetch_bundesagentur()
-    print(f"Bundesagentur raw: {len(ba_raw)}\n")
 
     arbeitnow_dach = [j for j in arbeitnow_raw if is_dach(j["location"])]
-    print(f"Arbeitnow DACH-filtered: {len(arbeitnow_dach)}")
-
+    
     all_jobs = arbeitnow_dach + ba_raw
     print(f"Total usable: {len(all_jobs)}\n")
 
@@ -407,12 +376,11 @@ def main():
 
     matches = []
     for i, job in enumerate(candidates, 1):
-        print(f"[{i}/{len(candidates)}] ({job['source']}) {job['title']} — {job['location']}")
+        print(f"[{i}/{len(candidates)}] {job['title']} — {job['location']}")
         pct = score_groq(job)
         if pct is None:
             pct = score_gemini(job)
         if pct is None:
-            print(f"  skipped")
             time.sleep(12)
             continue
         print(f"  {pct}%")
