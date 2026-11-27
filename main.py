@@ -11,8 +11,12 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
+JOOBLE_KEY = os.environ.get("JOOBLE_KEY", "")
+ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID", "")
+ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY", "")
+SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
-# ---------- Germany + Austria only. Switzerland removed. ----------
+# ---------- Germany + Austria only ----------
 DACH_CITIES = [
     "germany", "deutschland", "berlin", "münchen", "munich", "hamburg",
     "frankfurt", "köln", "cologne", "düsseldorf", "dusseldorf", "stuttgart",
@@ -22,7 +26,7 @@ DACH_CITIES = [
     "kiel", "rostock", "potsdam", "erfurt", "magdeburg", "saarbrücken",
     "krefeld", "wolfsburg", "ingolstadt", "regensburg", "ulm", "heilbronn",
     "paderborn", "bielefeld", "göttingen", "kassel", "würzburg",
-    "verl", "gütersloh", "guetersloh", "espelkamp",
+    "verl", "gütersloh", "guetersloh", "espelkamp", "ichtershausen",
     "österreich", "austria", "wien", "vienna", "graz", "linz",
     "salzburg", "innsbruck", "klagenfurt",
 ]
@@ -33,9 +37,7 @@ def is_dach(location):
 
 SWITZERLAND_RE = re.compile(
     r"\b(switzerland|schweiz|zürich|zurich|basel|bern|genf|geneva|"
-    r"luzern|lausanne|winterthur|st\.?\s*gallen|ch-)\b",
-    re.IGNORECASE,
-)
+    r"luzern|lausanne|winterthur|st\.?\s*gallen|ch-)\b", re.IGNORECASE)
 
 def is_switzerland(location):
     return bool(SWITZERLAND_RE.search(location or ""))
@@ -48,7 +50,6 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"senior|sr|lead|head.?of|director|vp|chief|principal|staff|"
     r"managing.?director|geschäftsführer|leitung|führungskraft|"
     r"teamleiter|teamleiterin|projektleiter|"
-    r"experte|spezialist|"
     r"developer|entwickler|full.?stack|fullstack|"
     r"backend|back.?end|frontend|front.?end|devops|site.?reliability|"
     r"cloud.?engineer|mobile.?developer|ios.?developer|android.?developer|"
@@ -61,7 +62,7 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"sales.?engineer|vertriebsingenieur|außendienst|aussendienst|"
     r"controller|fp.?&.?a|accounting|buchhaltung|bilanzbuchhalter|"
     r"ui.?ux|designer|grafiker|graphic|"
-    r"iot|embedded|sentinel|quality.?inspector|optical|thermal|"
+    r"embedded|sentinel|quality.?inspector|optical|thermal|"
     r"vehicle|forward.?deployed|"
     r"customer.?success|customer.?service|kundendienst|"
     r"kundenbetreuer|kundenberater|call.?center|telefonist|"
@@ -75,247 +76,206 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"data.?steward|data.?governance|data.?quality|"
     r"master.?data|stammdaten|stammdatenmanagement|"
     r"sanctions|transaction.?monitoring|financial.?crime|"
-    r"audit\w*|revision\w*|"
-    r"datenschutz\w*|data.?protection|"
-    r"risk.?management|risikomanagement|"
-    r"regulator\w*"
-    r")\b",
-    re.IGNORECASE,
-)
+    r"audit\w*|revision\w*|datenschutz\w*|data.?protection|"
+    r"risk.?management|risikomanagement|regulator\w*|"
+    r"it.?systemintegrator|it.?systemintegration|fachinformatiker|"
+    r"no.?code|low.?code|saas|crm.?manager|it.?support|"
+    r"it.?workplace|netzwerk|firewall|"
+    r"schweißer|schlosser|elektriker|elektroniker|elektromonteur|"
+    r"industrieelektroniker|monteur|montagemitarbeiter|montagefachkraft|"
+    r"produktionsmitarbeiter|produktionsfachkraft|fertigungsmitarbeiter|"
+    r"zerspanungsmechaniker|zerspanungsprogrammierer|fräser|cnc|"
+    r"industriemechaniker|anlagenmechaniker|servicetechniker|"
+    r"chemikant|mikrotechnologe|werkzeugmechaniker|schreiner|"
+    r"konstrukteur|konstruktionsingenieur|bim|revit|technischer.?zeichner|"
+    r"trafomonteur|verdrahter|elektromaschinenmonteur|"
+    r"teamassistenz|personalsachbearbeiter|speditionskaufmann|"
+    r"lagerlogistik|kommissionierer|ressourcenplaner|terminplaner|"
+    r"logistikplaner|kaufm\w*"
+    r")\b", re.IGNORECASE)
 
-# ---------- Hard reject body ----------
-# NOTE (Option B): "verhandlungssicher" REMOVED from this regex.
-# It is now a soft penalty (VERHANDLUNGSSICHER_RE + rank -10) so that
-# entry-level postings that use it as boilerplate (like Kärcher) survive.
-# Explicit "c1|c2" remains a hard reject.
+# ---------- Experience hard reject (bulletproof) ----------
+EXPERIENCE_HARD_RE = re.compile(
+    r"("
+    r"(?:mindestens|mind\.?|min\.?|minimum|wenigstens)\s*"
+    r"(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s*"
+    r"j(?:ahre|ahren|ahr)\b|"
+    r"\bab\s+(?:\d+|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+"
+    r"j(?:ahre|ahren|ahr)\b|"
+    r"(?:über|ueber|mehr\s+als)\s+\d+\s+j(?:ahre|ahren|ahr)\b|"
+    r"\d+\+?\s*j(?:ahre|ahren|ahr)\s+(?:berufs)?erfahrung\b|"
+    r"\d+\s*-?\s*jährige?\s+(?:berufs)?erfahrung\b|"
+    r"(?:zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s*-?\s*jährige?\s+"
+    r"(?:berufs)?erfahrung\b|"
+    r"\d+\s*(?:-|–|bis)\s*\d+\s*j(?:ahre|ahren|ahr)\s+(?:berufs)?erfahrung\b|"
+    r"(?:berufs)?erfahrung\s*:?\s*\d+\s*(?:-|–|bis)?\s*\d*\s*jahre?\b|"
+    r"sie\s+(?:haben|verfügen\s+über|verfuegen\s+ueber|bringen)\s+"
+    r".{0,20}?\d+\s*j(?:ahre|ahren|ahr)\b|"
+    r"einschlägige\s+(?:berufs)?erfahrung|"
+    r"einschlaegige\s+(?:berufs)?erfahrung|"
+    r"(?:berufs)?erfahrung\s+(?:erforderlich|vorausgesetzt|zwingend|notwendig|"
+    r"ist\s+voraussetzung|wird\s+erwartet)|"
+    r"(?:berufs)?erfahrung\s+wird\s+vorausgesetzt|"
+    r"(?:mehrjährige|mehrjaehrige|langjährige|langjaehrige|"
+    r"fundierte|ausgeprägte|ausgepraegte|nachweisbare)\s+(?:berufs)?erfahrung|"
+    r"mehrere\s+jahre\s+(?:berufs)?erfahrung|"
+    r"mehrere\s+jahre\s+erfahrung|"
+    r"langjährige\s+erfahrung"
+    r")", re.IGNORECASE)
+
+EXPERIENCE_SOFT_RE = re.compile(
+    r"("
+    r"(?:berufs)?erfahrung\s+(?:von\s+)?vorteil|"
+    r"erfahrung\s+(?:von\s+)?vorteil|"
+    r"w(?:ü|ue|u)nschenswert|"
+    r"idealerweise\s+.{0,40}erfahrung|"
+    r"von\s+vorteil.{0,60}erfahrung"
+    r")", re.IGNORECASE)
+
 HARD_REJECT_BODY_RE = re.compile(
-    r"\b("
-    r"c1|c2|muttersprache|"
+    r"("
+    r"\bc1\b|\bc2\b|muttersprache|"
     r"fließend.?deutsch|fliessend.?deutsch|"
     r"native.?german|deutsch.?als.?muttersprache|"
-    r"mehrjährige\s*(?:berufs)?erfahrung|mehrjaehrige\s*(?:berufs)?erfahrung|"
-    r"mindestens\s*\d+\s*jahre|mind\.\s*\d+\s*jahre|"
-    r"mindestens\s+(?:zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn)\s+jahre|"
     r"französisch|french|spanisch|italienisch|niederländisch|"
     r"maternity.?cover|temporary.?contract|befristet.?auf|"
     r"kyc|aml|geldwäsche|compliance|bankkaufmann|bankkauffrau|"
-    r"data steward|master data|stammdaten"
-    r")\b",
-    re.IGNORECASE,
-)
+    r"data.?steward|master.?data|stammdaten|"
+    r"hochspannung|freileitung|schaltanlage"
+    r")", re.IGNORECASE)
 
-# ---------- NEW (Option B): soft penalty for "verhandlungssicher" ----------
-VERHANDLUNGSSICHER_RE = re.compile(
-    r"\b(verhandlungssicher\w*|verhandlungssichere[rn]?)\b",
-    re.IGNORECASE,
-)
+VERHANDLUNGSSICHER_RE = re.compile(r"\bverhandlungssicher\w*\b", re.IGNORECASE)
 
-# ---------- Entry-level signals ----------
+# ---------- ANCHOR terms (thesis + cobot) ----------
+ANCHOR_TERMS = [
+    "pyironflow", "electrochemical", "electrochemistry", "elektrochemie",
+    "elektrochemisch", "potentiostat", "palmsens", "emstat",
+    "ender3", "ender 3", "positioniersystem",
+    "lab automation", "laboratory automation", "laborautomation",
+    "laborautomatisierung", "laborinformatik", "lab informatics",
+    "material acceleration", "self-driving lab", "self driving lab",
+    "autonomous lab", "autonomes labor",
+    "json-ld", "jsonld", "prov-o", "provo", "opmw", "ro-crate",
+    "provenance", "provenienz", "fair data", "fair-data",
+    "research data", "forschungsdaten", "forschungsdatenmanagement",
+    "messsystem", "mess- und positioniersystem", "messsystemanalyse",
+    "msa", "gage r&r", "gr&r", "kalibrierung", "kalibrierroutine",
+    "prüfmittel", "pruefmittel", "prüfmittelmanagement",
+    "prüfmittelüberwachung", "prüfstand", "teststand", "prüflabor",
+    "messtechnik", "messtechniker", "messingenieur", "measurement engineer",
+    "measurement system", "sensorintegration", "sensor integration",
+    "schnittstellentest", "interface testing",
+    "cobot", "kollaborativer roboter", "collaborative robot",
+    "omron", "tm5", "tmflow", "imbus", "imb-io",
+    "induktive wegaufnehmer", "induktiver wegaufnehmer", "inductive probe",
+    "wellenmessung", "shaft measurement",
+    "testingenieur", "test engineer", "testautomatisierung",
+    "test automation", "test bench", "prüfstandsentwickler",
+    "technischer redakteur", "technical writer",
+    "technische dokumentation", "technical documentation",
+]
+
+DOMAIN_BOOST_TERMS = [
+    "automatisierung", "automation", "automatisierungsingenieur",
+    "systemintegration", "system integration", "systemintegrator",
+    "inbetriebnahme", "commissioning", "robotik", "robotics", "roboter",
+    "qualitätssicherung", "quality assurance", "qualitätsmanagement",
+    "validierung", "validation", "prüfbericht", "prüfplan",
+    "sensorik", "sensor", "hardware", "interface", "schnittstelle",
+    "din iso", "din en iso", "iso 9001", "iatf", "vda",
+    "python", "matlab", "labview", "vba",
+    "api", "rest", "docker", "git", "sql", "linux",
+    "anforderungsanalyse", "requirements engineer", "anforderungsmanagement",
+    "messsoftware", "datenerfassung", "datenauswertung",
+]
+
+WEAK_TERMS = ["prozess", "process", "projekt", "project",
+              "dokumentation", "documentation", "team", "analytisch"]
+
 ENTRY_LEVEL_PHRASES = [
-    "berufseinsteiger", "berufseinsteigerin", "berufseinsteigerinnen",
-    "berufseinsteiger:innen", "berufseinsteiger*innen",
-    "berufseinstieg", "einstiegsposition", "einstiegsstelle",
-    "berufsanfänger", "berufsanfaenger", "berufsanfängerin", "berufsanfängerinnen",
-    "berufsanfänger:innen", "berufsanfänger*innen",
-    "hochschulabsolvent", "hochschulabsolventen", "hochschulabsolventin",
-    "hochschulabsolventinnen", "hochschulabsolvent:innen", "hochschulabsolvent*innen",
-    "absolvent", "absolventen", "absolventin", "absolventinnen",
-    "absolvent:innen", "absolvent*innen",
-    "trainee", "traineeprogramm", "trainee-programm", "trainee programm",
-    "graduate", "graduates", "entry level", "entry-level",
-    "young professional", "young professionals",
-    "einsteiger", "einsteigerin", "einsteigerinnen", "einsteiger:innen",
-    "junior", "juniorstelle", "junior-stelle",
-    "quereinsteiger", "quereinsteigerin", "quereinsteigerinnen",
-    "quereinsteiger:innen", "quereinsteiger*innen", "quereinstieg",
+    "berufseinsteiger", "berufseinstieg", "einstiegsposition",
+    "berufsanfänger", "berufsanfaenger", "hochschulabsolvent",
+    "absolvent", "trainee", "graduate", "entry level", "entry-level",
+    "young professional", "einsteiger", "junior", "juniorstelle",
+    "quereinsteiger", "quereinstieg",
     "keine berufserfahrung", "ohne berufserfahrung",
-    "keine berufserfahrung erforderlich",
     "keine vorkenntnisse", "ohne vorkenntnisse",
-    "erfahrung ist egal", "berufserfahrung ist egal", "erfahrung egal",
-    "erfahrung: egal", "berufserfahrung: egal",
+    "erfahrung ist egal", "erfahrung egal",
     "berufserfahrung nicht erforderlich", "erfahrung nicht erforderlich",
     "berufserfahrung nicht zwingend", "erfahrung nicht zwingend",
-    "vorkenntnisse nicht erforderlich", "vorkenntnisse nicht zwingend",
-    "auch berufseinsteiger willkommen", "berufseinsteiger willkommen",
+    "berufserfahrung von vorteil", "erfahrung von vorteil",
+    "erste berufserfahrung", "erste erfahrung",
+    "erste berührungspunkte", "erste kenntnisse",
+    "bereitschaft zur einarbeitung", "einarbeitung",
+    "0-1 jahre", "0-2 jahre", "0-3 jahre", "1-2 jahre", "1-3 jahre",
+    "bis zu 2 jahre", "bis zu 3 jahre", "maximal 2 jahre", "maximal 3 jahre",
+    "auch berufseinsteiger", "berufseinsteiger willkommen",
     "berufseinsteiger sind auch willkommen",
-    "berufseinsteiger:innen sind auch willkommen",
-    "auch berufseinsteiger:innen willkommen",
-    "auch als berufseinsteiger", "auch als berufseinsteigerin",
-    "auch ohne berufserfahrung", "auch ohne erfahrung",
-    "auch quereinsteiger willkommen", "quereinsteiger willkommen",
-    "auch quereinsteiger:innen willkommen",
-    "wir freuen uns auf berufseinsteiger", "wir freuen uns über berufseinsteiger",
-    "0-1 jahre", "0 bis 1 jahre", "0-2 jahre", "0 bis 2 jahre",
-    "0-3 jahre", "0 bis 3 jahre", "1-2 jahre", "1 bis 2 jahre",
-    "1-3 jahre", "1 bis 3 jahre", "bis zu 2 jahre", "bis zu 3 jahre",
-    "maximal 2 jahre", "maximal 3 jahre",
-    "erste berufserfahrung", "erste erfahrung", "erste praktische erfahrung",
-    "1 jahr erfahrung", "1 jahr berufserfahrung",
+    "auch ohne berufserfahrung", "auch quereinsteiger",
 ]
 
-ENTRY_TITLE_TERMS = [
-    "junior", "trainee", "absolvent", "einsteiger", "graduate",
-    "berufseinsteiger", "hochschulabsolvent", "entry level", "entry-level",
-    "young professional", "quereinsteiger",
-]
+ENTRY_TITLE_TERMS = ["junior", "trainee", "absolvent", "einsteiger",
+                     "graduate", "berufseinsteiger", "hochschulabsolvent",
+                     "entry level", "entry-level", "young professional",
+                     "quereinsteiger"]
 
 MID_LEVEL_PENALTY_RE = re.compile(
-    r"("
-    r"erfahrene[rn]?\s+(?:persönlichkeit|fachkraft|ingenieur|entwickler|mitarbeiter)|"
-    r"mehrere\s+jahre\s+(?:berufs)?erfahrung|"
-    r"langjährige\s+(?:berufs)?erfahrung|"
-    r"fundierte\s+(?:berufs)?erfahrung|"
-    r"(?:[3-9]|\d{2,})\s*[-–]\s*\d+\s*jahre\s*(?:berufs)?erfahrung|"
-    r"(?:[3-9]|\d{2,})\+?\s*jahre\s*(?:berufs)?erfahrung"
-    r")",
-    re.IGNORECASE,
-)
-
-# ---------- TIER1_STRONG: at least ONE must match to survive ----------
-TIER1_STRONG = [
-    # Test / Prüfmittel
-    "testingenieur", "test engineer", "test automation", "testautomatisierung",
-    "prüfmittel", "prüfmittelentwickler", "prüfmittelplaner", "prüfingenieur",
-    "prüfstand", "teststand", "prüfstandsentwickler",
-    "testapplikation", "test system", "testsystem",
-    "qualitätssicherung", "quality assurance",
-    "produktprüfung", "produkttest",
-    # Measurement / Messtechnik
-    "messtechnik", "messtechniker", "measurement engineer", "measurement system",
-    "messingenieur",                                   # NEW (Option B)
-    "kalibrierung", "calibration", "kalibriertechniker", "kalibrieringenieur",
-    "sensorintegration", "sensor integration",
-    "messsystem", "messstation", "prüflabor",
-    # System integration
-    "systemintegration", "system integration", "systemintegrator",
-    "schnittstelle", "schnittstellen", "interface",
-    "inbetriebnahme", "commissioning",
-    "hardware-software", "hardware software", "hardware/software",
-    "hardware integration", "hardware-integration",
-    # Lab automation (thesis-specific)
-    "laborautomation", "laborautomatisierung", "lab automation",
-    "laboratory automation", "lab automation engineer",
-    "pyironflow", "workflow automation", "workflow system",
-    "elektrochemie", "electrochemistry", "electrochemical",
-    "potentiostat", "palmsens",
-    "material acceleration", "self-driving lab", "self driving lab",
-    "laborinformatik", "lab informatics",
-    "labor digitalisierung", "lab digitalization",
-    "labor 4.0", "lab 4.0",
-    # Cobot / Robotics
-    "cobot", "kollaborativer roboter", "collaborative robot",
-    "omron", "tm5", "tmflow",
-    "robotik", "robotics", "roboter",
-    "wellenmessung", "shaft measurement",
-    "imbus", "imb-io",
-    "induktive messung", "inductive probe",
-    # Automation
-    "automatisierung", "automation", "automatisierungsingenieur",
-    # Technical writing
-    "technischer redakteur", "technical writer", "technische dokumentation",
-    "technical documentation", "din iso", "din en iso",
-    # Requirements
-    "requirements engineer", "anforderungsanalyse", "anforderungsmanagement",
-    # FAIR / provenance (engineering context only)
-    "json-ld", "jsonld", "provenance", "prov-o", "opmw", "ro-crate",
-    "fair data", "fair-data", "research data management", "forschungsdaten",
-    "forschungsdatenmanagement", "metadata", "metadaten",
-]
-
-TIER1_WEAK = [
-    "python", "api", "rest", "rest api", "docker", "git",
-    "sql", "linux", "jupyter", "csv",
-    "data pipeline", "datenpipeline",
-    "prozess", "process",
-    "projekt", "project",
-]
-
-TIER1 = TIER1_STRONG + TIER1_WEAK
-
-TIER2 = [
-    "berufseinsteiger", "berufseinstieg", "quereinsteiger", "quereinstieg",
-    "absolvent", "junior", "trainee", "graduate",
-    "prozess", "process", "projekt", "project",
-    "dokumentation", "documentation",
-    "testing", "validierung", "quality assurance",
-    "ingenieur", "engineer", "mint"
-]
+    r"(erfahrene[rn]?\s+(?:persönlichkeit|fachkraft|ingenieur|entwickler)|"
+    r"mehrere\s+jahre|fundierte\s+kenntnisse|"
+    r"(?:[3-9]|\d{2,})\s*[-–]\s*\d+\s*jahre|(?:[3-9]|\d{2,})\+?\s*jahre)",
+    re.IGNORECASE)
 
 MAX_SCORE = 15
-MIN_MATCH = 50
-
+MIN_MATCH = 55
 ENTRY_RESERVE_NON_ENTRY = 4
 
 CV_SUMMARY = """
-M.Sc. Advanced Industrial Engineering (Wirtschaftsingenieurwesen, Grade 1.9), TH Rosenheim.
-B.Tech Mechanical Engineering.
+M.Sc. Advanced Industrial Engineering (Grade 1.9), TH Rosenheim. B.Tech Mechanical Engineering.
 
 BAM Berlin Master's Thesis: "Visual Programming Workflow for Electrochemical Automation"
-- Developed a node-based automation workflow in PyironFlow (Python) for electrochemical measurements.
+- Node-based automation workflow in PyironFlow (Python) for electrochemical measurements.
 - Integrated Ender3 positioning unit with PalmSens potentiostat via serial communication and REST APIs.
-- Built calibration and validation routines: positional accuracy, timing, data integrity.
-- Implemented FAIR data handling: JSON-LD metadata, PROV-O / OPMW provenance, RO-Crate.
-- Used Docker/Git for reproducible test environments.
+- Calibration and validation: positional accuracy, timing, data integrity.
+- FAIR data: JSON-LD metadata, PROV-O / OPMW provenance, RO-Crate.
+- Docker / Git for reproducible test environments.
 
-Cobot Project (Omron TM5-900 at TH Rosenheim):
-- Automated shaft measurement system integration: inductive probes, IMBus I/O modules, digital I/O.
-- Designed custom workpiece carriers and gripper jaws via additive manufacturing.
-- Programmed cobot, integrated sensors, pneumatics; built calibration routine (every 100 parts / 1 hour).
+Cobot Project (Omron TM5-900, TH Rosenheim):
+- Automated shaft measurement: inductive probes, IMBus I/O modules, digital I/O.
+- Custom workpiece carriers and gripper jaws (additive manufacturing).
+- Calibration routine every 100 parts / 1 hour.
 
-Professional Experience:
-6 years at Federal Bank: requirements analysis, project coordination, system rollouts, regulated documentation.
+Professional Experience: 6 years Federal Bank — requirements analysis, project coordination, system rollouts, regulated documentation.
 
 Languages: English C1, German B2. Work permit Section 18b.
 """
 
-THESIS_KEYWORDS = [
-    "pyironflow", "electrochemical", "potentiostat", "palmsens", "ender3",
-    "json-ld", "prov-o", "opmw", "ro-crate", "fair data",
-    "workflow automation", "lab automation", "laboratory automation",
-    "docker", "python", "rest api", "serial",
-    "measurement", "messtechnik", "calibration", "kalibrierung",
-    "validation", "positioning", "sensor", "hardware",
-    "cobot", "omron", "tm5", "imbus", "inductive probe",
-    "shaft measurement", "wellenmessung",
-]
-
 ENGLISH_PRIMARY_RE = re.compile(
     r"\b(english.?speaking|english.?working.?language|"
     r"working.?language.?english|project.?language.?english|"
-    r"fluent.?english|business.?english|english.?required|"
-    r"very.?good.?english|excellent.?english)\b",
-    re.IGNORECASE,
-)
+    r"fluent.?english|business.?english|english.?required)\b", re.IGNORECASE)
 
 GERMAN_ONLY_RE = re.compile(
     r"\b(deutschkenntnisse|german.?language|deutsch.?erforderlich|"
-    r"sehr.?gute.?deutsch|gute.?deutsch)\b",
-    re.IGNORECASE,
-)
+    r"sehr.?gute.?deutsch|gute.?deutsch)\b", re.IGNORECASE)
 
 groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_KEY)
 
 
 # ============================================================
-# FETCHERS (12 free sources)
+# FETCHERS — FREE SOURCES
 # ============================================================
 
 def fetch_arbeitnow():
     try:
         r = requests.get("https://www.arbeitnow.com/api/job-board-api", timeout=30)
         r.raise_for_status()
-        return [{
-            "title": j.get("title", ""),
-            "company": j.get("company_name", ""),
-            "location": j.get("location", ""),
-            "description": j.get("description", ""),
-            "url": j.get("url", ""),
-            "source": "arbeitnow",
-        } for j in r.json().get("data", [])]
+        return [{"title": j.get("title", ""), "company": j.get("company_name", ""),
+                 "location": j.get("location", ""), "description": j.get("description", ""),
+                 "url": j.get("url", ""), "source": "arbeitnow"}
+                for j in r.json().get("data", [])]
     except Exception as e:
-        print(f"Arbeitnow error: {e}")
-        return []
+        print(f"Arbeitnow error: {e}"); return []
 
 
 def fetch_bundesagentur():
@@ -324,127 +284,189 @@ def fetch_bundesagentur():
         "Laborautomation", "Laborautomatisierung", "Automatisierungsingenieur",
         "Prüfmittelentwickler", "Prüfmittelplaner", "Prüfingenieur",
         "Testingenieur", "Messtechnik Ingenieur", "Messtechniker",
-        "Messingenieur",                                # NEW (Option B)
-        "Kalibriertechniker", "Kalibrieringenieur",
-        "Systemintegrator", "Systemintegration", "Inbetriebnahmeingenieur",
-        "Applikationsentwickler Messtechnik", "Prüfstandsentwickler",
-        "Versuchsingenieur", "Softwareentwickler Mess- und Prüftechnik",
-        "Laborinformatiker",
+        "Messingenieur", "Kalibriertechniker", "Kalibrieringenieur",
+        "Systemintegrator", "Inbetriebnahmeingenieur", "Prüfstandsentwickler",
+        "Laborinformatiker", "Technischer Redakteur",
         "Lab Automation Engineer", "Laboratory Automation Engineer",
-        "Test Engineer", "Test Automation Engineer",
-        "Measurement Engineer", "Calibration Engineer",
-        "System Integration Engineer", "Commissioning Engineer",
-        "Application Engineer Measurement", "Test Bench Developer",
+        "Test Engineer", "Test Automation Engineer", "Measurement Engineer",
+        "Calibration Engineer", "System Integration Engineer",
         "Scientific Software Developer", "Research Data Engineer",
-        "Workflow Developer", "Requirements Engineer",
-        "PyironFlow", "electrochemical automation", "potentiostat",
-        "FAIR data", "JSON-LD", "PROV-O", "metadata",
-        "research data management", "Material Acceleration Platform",
-        "cobot", "collaborative robot", "Omron TM5", "TMFlow",
-        "IMBus", "Wellenmessung", "Prüfmittel", "Messstation",
+        "Requirements Engineer", "PyironFlow", "electrochemical automation",
+        "potentiostat", "FAIR data", "JSON-LD", "PROV-O", "metadata",
+        "cobot", "collaborative robot", "Omron TM5", "IMBus", "Wellenmessung",
     ]
-    jobs = []
-    seen = set()
-
+    jobs, seen = [], set()
     for q in queries:
         params = {"was": q, "size": 40, "page": 1, "veroeffentlichtseit": 14}
         try:
             r = requests.get(
                 "https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs",
-                headers=headers, params=params, timeout=30,
-            )
+                headers=headers, params=params, timeout=30)
             if r.status_code != 200:
                 continue
-
             data = r.json()
             results = data.get("ergebnisliste") or data.get("ergebnisse") or []
-            print(f"  BA '{q}': {len(results)} results")
-
+            print(f"  BA '{q}': {len(results)}")
             for j in results:
                 if not isinstance(j, dict):
                     continue
-
                 t = j.get("stellenangebotsTitel") or j.get("titel") or j.get("beruf") or ""
-                if not isinstance(t, str):
-                    t = ""
-                t = t.strip()
-                if not t or t in seen:
+                if not isinstance(t, str) or not t.strip() or t.strip() in seen:
                     continue
-                seen.add(t)
-
+                seen.add(t.strip())
                 loc = ""
                 lok = j.get("stellenlokationen")
-                if isinstance(lok, list) and lok:
-                    first = lok[0]
-                    if isinstance(first, dict):
-                        addr = first.get("adresse", {})
-                        if isinstance(addr, dict):
-                            loc = addr.get("ort", "") or ""
-
+                if isinstance(lok, list) and lok and isinstance(lok[0], dict):
+                    addr = lok[0].get("adresse", {})
+                    if isinstance(addr, dict):
+                        loc = addr.get("ort", "") or ""
                 desc = j.get("beschreibung") or ""
-                if not isinstance(desc, str):
-                    desc = ""
-
                 jobs.append({
-                    "title": t,
-                    "company": j.get("firma") or j.get("arbeitgeber") or "",
-                    "location": loc or "Germany",
-                    "description": desc,
+                    "title": t.strip(), "company": j.get("firma") or j.get("arbeitgeber") or "",
+                    "location": loc or "Germany", "description": desc if isinstance(desc, str) else "",
                     "url": f"https://www.arbeitsagentur.de/jobsuche/jobdetail/{j.get('referenznummer','')}",
-                    "source": "bundesagentur",
-                })
+                    "source": "bundesagentur"})
         except Exception as e:
             print(f"  BA '{q}' exception: {e}")
+    return jobs
 
+
+def _html_job_fetch(base_url, queries, link_pattern, source_name,
+                    default_location="Germany"):
+    jobs, seen = [], set()
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
+    for q in queries:
+        try:
+            r = requests.get(f"{base_url}{quote(q)}", headers=headers, timeout=20)
+            if r.status_code != 200:
+                print(f"  {source_name} '{q}': HTTP {r.status_code}")
+                continue
+            hits = 0
+            for m in re.finditer(link_pattern, r.text, re.DOTALL):
+                path, inner = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not inner or len(inner) < 5 or len(inner) > 140:
+                    continue
+                key = (path, inner)
+                if key in seen:
+                    continue
+                seen.add(key)
+                base = "/".join(base_url.split("/")[:3])
+                url = path if path.startswith("http") else base + path
+                jobs.append({"title": inner, "company": source_name,
+                             "location": default_location, "description": "",
+                             "url": url, "source": source_name})
+                hits += 1
+            print(f"  {source_name} '{q}': {hits}")
+        except Exception as e:
+            print(f"  {source_name} '{q}' exception: {e}")
     return jobs
 
 
 def fetch_academics_de():
+    return _html_job_fetch(
+        "https://www.academics.de/jobs?q=",
+        ["Lab Automation", "Laboratory Automation", "FAIR data",
+         "research data management", "metadata", "PyironFlow",
+         "electrochemical", "workflow automation", "scientific software",
+         "measurement automation", "laboratory informatics"],
+        r'href="(/jobs/[^"#?]+-?\d{4,})"[^>]*>(.*?)</a>', "academics_de")
+
+
+def fetch_jobriver():
+    return _html_job_fetch(
+        "https://jobriver.de/jobs?q=",
+        ["laborautomation", "messtechnik", "prüfmittel", "kalibrierung",
+         "testingenieur", "automatisierung", "systemintegration"],
+        r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>', "jobriver")
+
+
+def fetch_englishjobs():
+    jobs, seen = [], set()
+    try:
+        r = requests.get("https://englishjobs.de/", timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 200:
+            for m in re.finditer(r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>',
+                                 r.text, re.DOTALL):
+                path, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not title or len(title) < 5 or path in seen:
+                    continue
+                seen.add(path)
+                jobs.append({"title": title, "company": "EnglishJobs.de",
+                             "location": "Germany", "description": "",
+                             "url": f"https://englishjobs.de{path}",
+                             "source": "englishjobs"})
+        print(f"  EnglishJobs: {len(jobs)}")
+    except Exception as e:
+        print(f"  EnglishJobs exception: {e}")
+    return jobs
+
+
+def fetch_germantechjobs():
+    jobs, seen = [], set()
+    try:
+        r = requests.get("https://germantechjobs.de/en", timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 200:
+            for m in re.finditer(r'href="(/en/jobs/[^"#?]+)"[^>]*>(.*?)</a>',
+                                 r.text, re.DOTALL):
+                path, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not title or len(title) < 5 or path in seen:
+                    continue
+                seen.add(path)
+                jobs.append({"title": title, "company": "GermanTechJobs",
+                             "location": "Germany", "description": "",
+                             "url": f"https://germantechjobs.de{path}",
+                             "source": "germantechjobs"})
+        print(f"  GermanTechJobs: {len(jobs)}")
+    except Exception as e:
+        print(f"  GermanTechJobs exception: {e}")
+    return jobs
+
+
+def fetch_jobs_daheim():
     jobs = []
-    seen_urls = set()
-    queries = [
-        "Lab Automation", "Laboratory Automation", "FAIR data",
-        "research data management", "metadata", "PyironFlow",
-        "electrochemical", "Python data", "data engineer",
-        "workflow automation", "scientific software",
-        "measurement automation", "laboratory informatics",
-    ]
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
+    try:
+        r = requests.get("https://jobs-daheim.de/", timeout=20,
+                         headers={"User-Agent": "Mozilla/5.0"})
+        if r.status_code == 200:
+            for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                                 r.text, re.DOTALL):
+                href = m.group(1)
+                inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if "/job/" in href and 5 < len(inner) < 140:
+                    jobs.append({"title": inner, "company": "Jobs-Daheim",
+                                 "location": "DACH (remote)", "description": "",
+                                 "url": href if href.startswith("http") else "https://jobs-daheim.de" + href,
+                                 "source": "jobs_daheim"})
+        print(f"  Jobs-Daheim: {len(jobs)}")
+    except Exception as e:
+        print(f"  Jobs-Daheim exception: {e}")
+    return jobs
 
-    for q in queries:
-        try:
-            url = f"https://www.academics.de/jobs?q={quote(q)}"
-            r = requests.get(url, headers=headers, timeout=20)
-            if r.status_code != 200:
-                print(f"  academics.de '{q}': HTTP {r.status_code}")
-                continue
 
-            links = re.findall(r'href="(/jobs/[^"#?]+)"', r.text)
-            print(f"  academics.de '{q}': {len(links)} links")
-
-            for link in links:
-                if not re.search(r'-\d{4,}$', link):
-                    continue
-                if link in seen_urls:
-                    continue
-                seen_urls.add(link)
-
-                slug = link.split("/jobs/")[-1]
-                title = re.sub(r'-\d+$', '', slug).replace('-', ' ').replace('/', ' ').title().strip()
-                if not title or len(title) < 5:
-                    continue
-
-                jobs.append({
-                    "title": title,
-                    "company": "academics.de",
-                    "location": "Germany",
-                    "description": "",
-                    "url": f"https://www.academics.de{link}",
-                    "source": "academics_de",
-                })
-        except Exception as e:
-            print(f"  academics.de '{q}' exception: {e}")
-
+def fetch_kowi():
+    jobs = []
+    try:
+        r = requests.get("https://www.kowi.de/desktopdefault.aspx/tabid-111/",
+                         timeout=20, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        for m in re.finditer(r'\[([^\]]{10,180})\]\(([^)]+)\)', r.text):
+            title, url = m.group(1).strip(), m.group(2).strip()
+            if not url.startswith("http"):
+                url = "https://www.kowi.de" + url
+            tl = title.lower()
+            if any(k in tl for k in ["helmholtz", "leibniz", "fraunhofer",
+                                     "postdoc", "phd", "research", "scientist",
+                                     "engineer", "data", "python", "doktorand",
+                                     "wissenschaft", "automation", "laboratory",
+                                     "measurement", "electrochemical", "workflow"]):
+                jobs.append({"title": title, "company": "Research institute (KoWi)",
+                             "location": "Germany / Austria", "description": "",
+                             "url": url, "source": "kowi"})
+        print(f"  KoWi: {len(jobs)}")
+    except Exception as e:
+        print(f"  KoWi exception: {e}")
     return jobs
 
 
@@ -463,14 +485,9 @@ def _parse_rss(url, source_name, default_location="Germany / Remote", title_filt
             combined = (title + " " + desc).lower()
             if title_filter and not any(k in combined for k in title_filter):
                 continue
-            jobs.append({
-                "title": title,
-                "company": source_name,
-                "location": default_location,
-                "description": desc,
-                "url": link,
-                "source": source_name,
-            })
+            jobs.append({"title": title, "company": source_name,
+                         "location": default_location, "description": desc,
+                         "url": link, "source": source_name})
         print(f"  {source_name}: {len(jobs)}")
     except Exception as e:
         print(f"  {source_name} exception: {e}")
@@ -478,193 +495,225 @@ def _parse_rss(url, source_name, default_location="Germany / Remote", title_filt
 
 
 def fetch_euraxess():
-    return _parse_rss(
-        "https://www.euraxess.ba/sr/services/jobs/rss",
-        "euraxess",
-        default_location="Germany / Austria / EU",
-        title_filter=["germany", "austria", "deutschland", "österreich",
-                      "data", "engineer", "research", "automation",
-                      "laboratory", "measurement", "electrochemical"],
-    )
+    return _parse_rss("https://www.euraxess.ba/sr/services/jobs/rss", "euraxess",
+                      "Germany / Austria / EU",
+                      ["germany", "austria", "deutschland", "österreich",
+                       "data", "engineer", "research", "automation",
+                       "laboratory", "measurement", "electrochemical"])
 
 
 def fetch_weworkremotely():
     return _parse_rss(
         "https://weworkremotely.com/categories/remote-programming-jobs.rss",
-        "weworkremotely",
-        default_location="Remote",
-        title_filter=["python", "engineer", "integration", "test", "automation",
-                      "data", "api", "lab", "workflow"],
-    )
+        "weworkremotely", "Remote",
+        ["python", "engineer", "integration", "test", "automation",
+         "data", "api", "lab", "workflow", "measurement"])
 
 
 def fetch_remotive():
-    return _parse_rss(
-        "https://remotive.com/remote-jobs/feed/engineering",
-        "remotive",
-        default_location="Remote",
-        title_filter=["python", "engineer", "integration", "test", "automation",
-                      "data", "api", "lab", "workflow"],
-    )
+    return _parse_rss("https://remotive.com/remote-jobs/feed/engineering",
+                      "remotive", "Remote",
+                      ["python", "engineer", "integration", "test", "automation",
+                       "data", "api", "lab", "workflow"])
 
 
 def fetch_berlinstartupjobs():
-    return _parse_rss(
-        "https://berlinstartupjobs.com/feed/",
-        "berlinstartupjobs",
-        default_location="Berlin, Germany",
-        title_filter=["python", "engineer", "integration", "test", "automation",
-                      "data", "api", "technical", "lab"],
-    )
+    return _parse_rss("https://berlinstartupjobs.com/feed/",
+                      "berlinstartupjobs", "Berlin, Germany",
+                      ["python", "engineer", "integration", "test", "automation",
+                       "data", "api", "technical", "lab", "measurement"])
 
 
-def fetch_kowi():
-    jobs = []
+def fetch_jobvector():
+    return _html_job_fetch(
+        "https://www.jobvector.de/jobs/?q=",
+        ["Messtechnik", "Automatisierung", "Laborautomation", "Testingenieur",
+         "Prüfmittel", "Kalibrierung", "Python", "Laboratory Automation",
+         "Measurement", "Test Engineer", "Electrochemical", "Lab Automation"],
+        r'href="(/jobs/[^"#?]+-\d+/?|/job/[^"#?]+)"[^>]*>(.*?)</a>', "jobvector")
+
+
+def fetch_jobware():
+    return _html_job_fetch(
+        "https://www.jobware.de/jobs/?q=",
+        ["Messtechnik", "Laborautomation", "Prüfmittel", "Testingenieur",
+         "Automatisierung", "Kalibrierung", "Measurement Engineer",
+         "Test Engineer", "Laboratory Automation"],
+        r'href="(/job/[^"#?]+|/stellenangebote/[^"#?]+)"[^>]*>(.*?)</a>', "jobware")
+
+
+def fetch_research_in_germany():
+    jobs, seen = [], set()
     try:
-        r = requests.get(
-            "https://www.kowi.de/desktopdefault.aspx/tabid-111/",
-            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
-        )
-        r.raise_for_status()
-        for m in re.finditer(r'\[([^\]]{10,180})\]\(([^)]+)\)', r.text):
-            title = m.group(1).strip()
-            url = m.group(2).strip()
-            if not url.startswith("http"):
-                url = "https://www.kowi.de" + url
-            tl = title.lower()
-            if any(k in tl for k in [
-                "helmholtz", "leibniz", "fraunhofer", "postdoc", "phd",
-                "research", "scientist", "engineer", "data", "python",
-                "doktorand", "wissenschaft", "automation", "laboratory",
-                "measurement", "electrochemical", "workflow",
-            ]):
-                jobs.append({
-                    "title": title,
-                    "company": "Research institute (KoWi)",
-                    "location": "Germany / Austria",
-                    "description": "",
-                    "url": url,
-                    "source": "kowi",
-                })
-        print(f"  KoWi: {len(jobs)}")
-    except Exception as e:
-        print(f"  KoWi exception: {e}")
-    return jobs
-
-
-def fetch_jobriver():
-    jobs = []
-    seen = set()
-    queries = ["systemintegration", "testingenieur", "automatisierung",
-               "python", "messtechnik", "daten", "laborautomation",
-               "prüfmittel", "kalibrierung", "messingenieur"]
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; JobRadar/1.0)"}
-    try:
-        for q in queries:
-            r = requests.get(f"https://jobriver.de/jobs?q={quote(q)}", headers=headers, timeout=20)
-            if r.status_code != 200:
-                continue
-            for m in re.finditer(r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
-                path = m.group(1)
-                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 5 or path in seen:
-                    continue
-                seen.add(path)
-                jobs.append({
-                    "title": title,
-                    "company": "JOBRIVER",
-                    "location": "Germany",
-                    "description": "",
-                    "url": f"https://jobriver.de{path}",
-                    "source": "jobriver",
-                })
-        print(f"  JOBRIVER: {len(jobs)}")
-    except Exception as e:
-        print(f"  JOBRIVER exception: {e}")
-    return jobs
-
-
-def fetch_jobs_daheim():
-    jobs = []
-    try:
-        r = requests.get(
-            "https://jobs-daheim.de/",
-            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
-        )
+        r = requests.get("https://www.research-in-germany.org/en/jobs.html",
+                         timeout=25, headers={"User-Agent": "Mozilla/5.0"})
         if r.status_code == 200:
-            for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
+            for m in re.finditer(r'href="([^"]*jobs?/[^"]+)"[^>]*>(.*?)</a>',
+                                 r.text, re.DOTALL):
                 href = m.group(1)
-                inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if "/job/" in href and 5 < len(inner) < 140:
-                    jobs.append({
-                        "title": inner,
-                        "company": "Jobs-Daheim",
-                        "location": "DACH (remote)",
-                        "description": "",
-                        "url": href if href.startswith("http") else "https://jobs-daheim.de" + href,
-                        "source": "jobs_daheim",
-                    })
-        print(f"  Jobs-Daheim: {len(jobs)}")
+                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                if not title or len(title) < 10 or len(title) > 160 or href in seen:
+                    continue
+                seen.add(href)
+                if any(k in title.lower() for k in ["data", "engineer", "research",
+                                                    "scientist", "automation",
+                                                    "measurement", "postdoc", "phd"]):
+                    url = href if href.startswith("http") else "https://www.research-in-germany.org" + href
+                    jobs.append({"title": title, "company": "Research in Germany",
+                                 "location": "Germany", "description": "",
+                                 "url": url, "source": "research_in_germany"})
+        print(f"  Research-in-Germany: {len(jobs)}")
     except Exception as e:
-        print(f"  Jobs-Daheim exception: {e}")
+        print(f"  Research-in-Germany exception: {e}")
     return jobs
 
 
-def fetch_englishjobs():
-    jobs = []
-    seen = set()
+def fetch_wila_bonn():
+    jobs, seen = [], set()
     try:
-        r = requests.get(
-            "https://englishjobs.de/",
-            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
-        )
+        r = requests.get("https://www.wila-bonn.de/stellenangebote/",
+                         timeout=25, headers={"User-Agent": "Mozilla/5.0"})
         if r.status_code == 200:
-            for m in re.finditer(r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
+            for m in re.finditer(r'href="(/stellenangebote?/[^"#?]+)"[^>]*>(.*?)</a>',
+                                 r.text, re.DOTALL):
                 path = m.group(1)
                 title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 5 or path in seen:
+                if not title or len(title) < 10 or path in seen:
                     continue
                 seen.add(path)
-                jobs.append({
-                    "title": title,
-                    "company": "EnglishJobs.de",
-                    "location": "Germany",
-                    "description": "",
-                    "url": f"https://englishjobs.de{path}",
-                    "source": "englishjobs",
-                })
-        print(f"  EnglishJobs: {len(jobs)}")
+                if any(k in title.lower() for k in ["engineer", "scientist",
+                                                    "research", "data", "technical",
+                                                    "automation", "measurement"]):
+                    jobs.append({"title": title, "company": "Wila Bonn",
+                                 "location": "Germany", "description": "",
+                                 "url": f"https://www.wila-bonn.de{path}",
+                                 "source": "wila_bonn"})
+        print(f"  Wila Bonn: {len(jobs)}")
     except Exception as e:
-        print(f"  EnglishJobs exception: {e}")
+        print(f"  Wila Bonn exception: {e}")
     return jobs
 
 
-def fetch_germantechjobs():
-    jobs = []
-    seen = set()
-    try:
-        r = requests.get(
-            "https://germantechjobs.de/en",
-            timeout=20, headers={"User-Agent": "Mozilla/5.0"},
-        )
-        if r.status_code == 200:
-            for m in re.finditer(r'href="(/en/jobs/[^"#?]+)"[^>]*>(.*?)</a>', r.text, re.DOTALL):
-                path = m.group(1)
-                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 5 or path in seen:
+# ---------- NEW: JOOBLE (free API, aggregates Google Jobs + many boards) ----------
+
+def fetch_jooble():
+    if not JOOBLE_KEY:
+        print("  Jooble: skipped (no JOOBLE_KEY)")
+        return []
+    jobs, seen = [], set()
+    queries = ["Messtechnik", "Laborautomation", "Testingenieur", "Prüfmittel",
+               "Kalibrierung", "Automatisierung", "Systemintegration",
+               "Measurement Engineer", "Lab Automation", "Test Engineer",
+               "Calibration Engineer", "Python Engineer"]
+    for q in queries:
+        try:
+            r = requests.post(f"https://jooble.org/api/{JOOBLE_KEY}",
+                              json={"keywords": q, "location": "Germany"},
+                              timeout=25)
+            if r.status_code != 200:
+                print(f"  Jooble '{q}': HTTP {r.status_code}")
+                continue
+            data = r.json().get("jobs", [])
+            print(f"  Jooble '{q}': {len(data)}")
+            for j in data:
+                key = j.get("link", "") or j.get("title", "")
+                if not key or key in seen:
                     continue
-                seen.add(path)
+                seen.add(key)
                 jobs.append({
-                    "title": title,
-                    "company": "GermanTechJobs",
-                    "location": "Germany",
-                    "description": "",
-                    "url": f"https://germantechjobs.de{path}",
-                    "source": "germantechjobs",
+                    "title": j.get("title", ""),
+                    "company": j.get("company", ""),
+                    "location": j.get("location", "Germany"),
+                    "description": j.get("snippet", ""),
+                    "url": j.get("link", ""),
+                    "source": "jooble",
                 })
-        print(f"  GermanTechJobs: {len(jobs)}")
-    except Exception as e:
-        print(f"  GermanTechJobs exception: {e}")
+        except Exception as e:
+            print(f"  Jooble '{q}' exception: {e}")
+    return jobs
+
+
+# ---------- NEW: ADZUNA (free tier, aggregates 1,000+ sources) ----------
+
+def fetch_adzuna():
+    if not (ADZUNA_APP_ID and ADZUNA_APP_KEY):
+        print("  Adzuna: skipped (no ADZUNA keys)")
+        return []
+    jobs, seen = [], set()
+    queries = ["Messtechnik", "Laborautomation", "Testingenieur", "Prüfmittel",
+               "Kalibrierung", "Automatisierung", "Systemintegration",
+               "Measurement Engineer", "Lab Automation", "Test Engineer",
+               "Calibration Engineer", "Python Engineer", "FAIR data"]
+    for q in queries:
+        try:
+            url = (f"https://api.adzuna.com/v1/api/jobs/de/search/1"
+                   f"?app_id={ADZUNA_APP_ID}&app_key={ADZUNA_APP_KEY}"
+                   f"&results_per_page=30&what={quote(q)}")
+            r = requests.get(url, timeout=25)
+            if r.status_code != 200:
+                print(f"  Adzuna '{q}': HTTP {r.status_code}")
+                continue
+            data = r.json().get("results", [])
+            print(f"  Adzuna '{q}': {len(data)}")
+            for j in data:
+                key = j.get("redirect_url", "") or j.get("title", "")
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                loc = j.get("location", {}).get("display_name", "Germany")
+                jobs.append({
+                    "title": j.get("title", ""),
+                    "company": j.get("company", {}).get("display_name", ""),
+                    "location": loc,
+                    "description": j.get("description", ""),
+                    "url": j.get("redirect_url", ""),
+                    "source": "adzuna",
+                })
+        except Exception as e:
+            print(f"  Adzuna '{q}' exception: {e}")
+    return jobs
+
+
+# ---------- NEW: SERPAPI GOOGLE JOBS (optional, 100 free/month) ----------
+
+def fetch_google_jobs():
+    if not SERPAPI_KEY:
+        print("  Google Jobs: skipped (no SERPAPI_KEY)")
+        return []
+    jobs, seen = [], set()
+    queries = ["Messtechnik Ingenieur", "Laborautomation", "Testingenieur",
+               "Prüfmittelentwickler", "Kalibrierung", "Automatisierung",
+               "Measurement Engineer", "Lab Automation Engineer",
+               "Test Engineer", "Berufseinsteiger Messtechnik"]
+    for q in queries:
+        try:
+            r = requests.get("https://serpapi.com/search.json",
+                             params={"engine": "google_jobs", "q": q,
+                                     "location": "Germany", "hl": "de",
+                                     "gl": "de", "api_key": SERPAPI_KEY},
+                             timeout=30)
+            if r.status_code != 200:
+                print(f"  Google Jobs '{q}': HTTP {r.status_code}")
+                continue
+            data = r.json().get("jobs_results", [])
+            print(f"  Google Jobs '{q}': {len(data)}")
+            for j in data:
+                key = (j.get("title", ""), j.get("company_name", ""))
+                if not key[0] or key in seen:
+                    continue
+                seen.add(key)
+                apply_opts = j.get("apply_options", [])
+                url = apply_opts[0].get("link", "") if apply_opts else ""
+                jobs.append({
+                    "title": j.get("title", ""),
+                    "company": j.get("company_name", ""),
+                    "location": j.get("location", "Germany"),
+                    "description": j.get("description", ""),
+                    "url": url,
+                    "source": "google_jobs",
+                })
+        except Exception as e:
+            print(f"  Google Jobs '{q}' exception: {e}")
     return jobs
 
 
@@ -673,7 +722,8 @@ def fetch_germantechjobs():
 # ============================================================
 
 def build_prompt(job):
-    desc = job['description'][:2500] if job['description'].strip() else "(not available - score based on title, company, location)"
+    desc = job['description'][:2500] if job['description'].strip() else \
+        "(not available — score based on title, company, location only)"
     return f"""Score this job 0-100 for the candidate. Return ONLY the integer.
 
 CANDIDATE:
@@ -684,45 +734,51 @@ Title: {job['title']}
 Location: {job['location']}
 Description: {desc}
 
-SCORING EXAMPLES (PURE TECHNICAL FOCUS):
-- "System Integration Engineer" (Hardware/Software) = 90
-- "Test Engineer / Testingenieur" (Automation, Python) = 85
-- "Messtechnik / Measurement Engineer" = 85
-- "Messingenieur" (Measurement Engineer) = 85
-- "Lab Automation Engineer" (Python, workflow) = 90
-- "Electrochemical / Potentiostat Automation Engineer" = 90
-- "Automation Engineer / Automatisierungsingenieur" (Cobot) = 80
-- "Research Data / FAIR Data / Metadata Engineer" = 80
-- "Scientific Software Developer" (Python, workflow) = 85
-- "Technical Writer" (Engineering, DIN/ISO) = 75
-- "Requirements Engineer" = 70
-- "Prozessmanager" in IT or Engineering = 60
-- "Berufseinsteiger / Trainee / Hochschulabsolvent / Graduate role" (technical fit) = 85
+STRONG FIT (score 80-95):
+- Lab automation / Laboratory automation engineer (Python, workflow)
+- Electrochemical / potentiostat automation
+- Measurement Engineer / Messtechniker / Messingenieur
+- Test Engineer / Testingenieur / Prüfstandstechniker
+- Calibration Engineer / Kalibriertechniker
+- System Integration Engineer (hardware/software, sensor, measurement)
+- Scientific Software Developer (workflow, provenance, Python)
+- Technical Writer / Technischer Redakteur
+- Research Data Engineer (FAIR data, metadata, Python)
+- Requirements Engineer
 
-NOT A FIT (0-25 ONLY, NEVER HIGHER):
-- KYC / AML / Compliance / Bankkaufmann / Financial Crime / Sanctions = 0 (NEVER above 0, regardless of title)
-- Data Steward / Data Governance / Master Data / SAP Stammdaten / Data Quality = 0 (NEVER above 0)
-- Audit / Revision / Risk Management / Regulatory = 5
-- Sales / Account Manager / Account Executive = 5
-- Full Stack / Backend / Frontend / DevOps = 5
-- Senior / Lead / Head of / Director = 0
-- Controller / FP&A / Accounting = 15
-- UI/UX / Designer = 5
-- IT-Systemadministrator / Network Admin = 25
-- HR Generalist / Recruiter = 5
+ENTRY-LEVEL BOOST (+10):
+- Berufseinsteiger, Trainee, Hochschulabsolvent, Graduate, Junior
+- "keine Erfahrung erforderlich", "Bereitschaft zur Einarbeitung"
+- "Erfahrung von Vorteil" (not required)
+
+HARD ZERO (score 0, never above):
+- KYC / AML / Compliance / Bankkaufmann / Financial Crime / Sanctions
+- Data Steward / Data Governance / Master Data / SAP Stammdaten
+- IT-Systemintegrator / Fachinformatiker / No-Code / Low-Code / SaaS / CRM
+- Sales / Account Manager / Account Executive
+- Full Stack / Backend / Frontend / DevOps / Cloud Engineer
+- Senior / Lead / Head of / Director / Principal
+- Audit / Risk Management / Regulatory Affairs
+
+LOW FIT (score 5-20):
+- Controller / FP&A / Accounting
+- UI/UX / Designer
+- IT-Systemadministrator / Network Admin
+- HR Generalist / Recruiter
+- Trade roles (Schweißer, Elektriker, Monteur, Zerspaner, CNC)
 
 RULES:
-Software developer roles (Java, C#, React) = 15 max.
-Any Senior/Lead/Head/Director title = 0-15.
-C1 German required = cap at 40.
-Verhandlungssichere Deutschkenntnisse = cap at 55 (soft penalty; do not zero out if the role is otherwise entry-level).
-B2 German required but NOT English-primary = cap at 65.
-More than 3 years experience required = cap at 50.
-Low-level manual testing or basic Excel data entry = 20 max.
-Entry-level / Berufseinsteiger / Trainee / Hochschulabsolvent roles = boost by +10.
-Roles requiring 3+ years experience = cap at 40.
-"Mehrjährige Berufserfahrung" or "mindestens 3 Jahre" = cap at 30.
-If the title contains "Compliance", "KYC", "AML", "Data Steward", "Master Data", "Stammdaten", "Governance", "Audit", or "Risk" = return 0 immediately, no exceptions.
+- Software developer roles (Java, C#, React) = 15 max.
+- Any Senior/Lead/Head/Director title = 0-15.
+- Explicit C1 German required = cap at 40.
+- "Verhandlungssichere Deutschkenntnisse" = cap at 55.
+- B2 German required, no English-primary = cap at 65.
+- More than 3 years experience required = cap at 40.
+- "Mehrjährige Berufserfahrung" or "mindestens 3 Jahre" = cap at 25.
+- "Berufserfahrung erforderlich" / "nachweisbare Erfahrung" = cap at 30.
+- If the description is empty, cap at 65.
+- If the title contains Compliance / KYC / AML / Data Steward / Master Data /
+  Stammdaten / Governance / Audit / Risk = return 0, no exceptions.
 
 Answer:"""
 
@@ -746,10 +802,8 @@ def score_groq(job):
             r = groq_client.chat.completions.create(
                 model="openai/gpt-oss-20b",
                 messages=[{"role": "user", "content": build_prompt(job)}],
-                temperature=0.0,
-                max_completion_tokens=2048,
-                reasoning_effort="low",
-            )
+                temperature=0.0, max_completion_tokens=2048,
+                reasoning_effort="low")
             s = parse_score(r.choices[0].message.content)
             if s is not None:
                 return s
@@ -771,35 +825,33 @@ def score_gemini(job):
         for attempt in range(2):
             try:
                 r = gemini_client.models.generate_content(
-                    model=model, contents=build_prompt(job),
-                )
+                    model=model, contents=build_prompt(job))
                 s = parse_score(r.text)
                 if s is not None:
                     return s
             except Exception as e:
                 if "503" in str(e):
-                    time.sleep(8)
-                    continue
+                    time.sleep(8); continue
                 break
     return None
 
 
 # ============================================================
-# RANKING — entry-level first, reserve for non-entry-level
+# FILTER — ANCHOR-GATED + EXPERIENCE-GATED
 # ============================================================
 
-def entry_level_flag(tl, bl):
-    title_hit = any(k in tl for k in ENTRY_TITLE_TERMS)
-    body_hits = sum(1 for phrase in ENTRY_LEVEL_PHRASES if phrase in bl)
-    return (title_hit or body_hits > 0), body_hits
+def find_anchor(tl, bl):
+    for term in ANCHOR_TERMS:
+        if term in tl or term in bl:
+            return term
+    return None
 
 
 def rank_and_filter(jobs):
-    entry_pool = []
-    other_pool = []
+    entry_pool, other_pool = [], []
     seen = set()
-    stats = {"title": 0, "body": 0, "no_strong": 0, "kept": 0,
-             "entry": 0, "other": 0}
+    stats = {"title": 0, "experience": 0, "body": 0,
+             "no_anchor": 0, "kept": 0, "entry": 0, "other": 0}
 
     for job in jobs:
         title = job["title"].strip()
@@ -808,58 +860,52 @@ def rank_and_filter(jobs):
         seen.add(title)
 
         tl = title.lower()
-        bl = job["description"].lower()
-        body_head = bl[:400]
+        bl = (job.get("description") or "").lower()
+        body_head = bl[:500]
 
         if HARD_REJECT_TITLE_RE.search(tl):
-            stats["title"] += 1
-            continue
+            stats["title"] += 1; continue
+        if EXPERIENCE_HARD_RE.search(bl):
+            stats["experience"] += 1; continue
         if HARD_REJECT_BODY_RE.search(bl):
-            stats["body"] += 1
-            continue
+            stats["body"] += 1; continue
 
-        strong_title = sum(1 for p in TIER1_STRONG if p in tl)
-        strong_head = sum(1 for p in TIER1_STRONG if p in body_head)
-        strong_body = sum(1 for p in TIER1_STRONG if p in bl)
+        anchor = find_anchor(tl, body_head) or find_anchor("", bl)
+        if anchor is None:
+            stats["no_anchor"] += 1; continue
 
-        if strong_title == 0 and strong_head == 0:
-            stats["no_strong"] += 1
-            continue
+        domain_hits = sum(1 for p in DOMAIN_BOOST_TERMS if p in (tl + " " + bl))
+        weak_hits = sum(1 for p in WEAK_TERMS if p in (tl + " " + body_head))
+        anchor_in_title = 1 if find_anchor(tl, "") else 0
 
-        weak_title = sum(1 for p in TIER1_WEAK if p in tl)
-        weak_head = sum(1 for p in TIER1_WEAK if p in body_head)
-        weak_body = sum(1 for p in TIER1_WEAK if p in bl)
-
-        t2 = sum(1 for p in TIER2 if p in (tl + " " + body_head))
-        rank = (
-            10 * strong_title + 6 * strong_head + 2 * strong_body
-            + 2 * weak_title + 1 * weak_head + 1 * weak_body
-            + 1 * t2
-        )
+        rank = 10 * anchor_in_title + 2 * domain_hits + 1 * weak_hits
 
         if ENGLISH_PRIMARY_RE.search(bl):
             rank += 5
         if GERMAN_ONLY_RE.search(bl) and not ENGLISH_PRIMARY_RE.search(bl):
             rank -= 3
-
-        # NEW (Option B): "verhandlungssicher" is a soft penalty, not a hard reject
         if VERHANDLUNGSSICHER_RE.search(bl):
             rank -= 10
-
-        if job.get("source") in ("academics_de", "kowi", "euraxess", "jobriver",
-                                  "jobs_daheim", "englishjobs", "germantechjobs"):
+        if job.get("source") in ("academics_de", "kowi", "euraxess",
+                                 "jobriver", "jobs_daheim", "englishjobs",
+                                 "germantechjobs", "jobvector", "jobware",
+                                 "research_in_germany", "wila_bonn", "jooble",
+                                 "adzuna", "google_jobs"):
             rank += 4
 
-        is_entry, entry_hits = entry_level_flag(tl, bl)
-
+        entry_hits = sum(1 for p in ENTRY_LEVEL_PHRASES if p in bl)
+        is_entry = entry_hits > 0 or any(k in tl for k in ENTRY_TITLE_TERMS)
         if entry_hits:
-            rank += min(entry_hits * 5, 30)
+            rank += min(entry_hits * 5, 40)
         if any(k in tl for k in ENTRY_TITLE_TERMS):
-            rank += 15
-
+            rank += 25
+        if EXPERIENCE_SOFT_RE.search(bl) and not is_entry:
+            rank -= 8
         if MID_LEVEL_PENALTY_RE.search(bl):
-            rank -= 5
+            rank -= 8
 
+        job["anchor"] = anchor
+        job["is_entry"] = is_entry
         stats["kept"] += 1
         if is_entry:
             stats["entry"] += 1
@@ -873,28 +919,17 @@ def rank_and_filter(jobs):
 
     cap_entry = max(MAX_SCORE - ENTRY_RESERVE_NON_ENTRY, 1)
     take_entry = entry_pool[:cap_entry]
-    remaining_slots = MAX_SCORE - len(take_entry)
-    take_other = other_pool[:remaining_slots]
-
+    take_other = other_pool[:MAX_SCORE - len(take_entry)]
     selected = take_entry + take_other
     selected.sort(key=lambda x: x[0], reverse=True)
 
     print(f"Rejected (title): {stats['title']}")
-    print(f"Rejected (body): {stats['body']}")
-    print(f"Rejected (no STRONG term): {stats['no_strong']}")
-    print(f"Surviving: {stats['kept']} (entry-level: {stats['entry']}, other: {stats['other']})")
-    print(f"Selected for scoring: {len(selected)} "
-          f"(entry-level: {len(take_entry)}, non-entry reserved: {len(take_other)})")
-
+    print(f"Rejected (experience): {stats['experience']}")
+    print(f"Rejected (body/domain): {stats['body']}")
+    print(f"Rejected (no ANCHOR): {stats['no_anchor']}")
+    print(f"Surviving: {stats['kept']} (entry: {stats['entry']}, other: {stats['other']})")
+    print(f"Selected: {len(selected)} (entry: {len(take_entry)}, other: {len(take_other)})")
     return [j for _, j in selected]
-
-
-def thesis_fit_line(job):
-    text = (job["title"] + " " + job["description"]).lower()
-    hits = [kw for kw in THESIS_KEYWORDS if kw in text]
-    if not hits:
-        return ""
-    return "🔬 Thesis fit: " + ", ".join(hits[:4])
 
 
 def send_tg(text):
@@ -902,9 +937,7 @@ def send_tg(text):
         requests.post(
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML",
-                  "disable_web_page_preview": True},
-            timeout=15,
-        )
+                  "disable_web_page_preview": True}, timeout=15)
     except Exception as e:
         print(f"Telegram error: {e}")
 
@@ -914,28 +947,38 @@ def send_tg(text):
 # ============================================================
 
 def main():
-    print("=== Fetching (free sources only, DE + AT) ===")
-    arbeitnow_raw   = fetch_arbeitnow()
-    ba_raw          = fetch_bundesagentur()
-    academics_raw   = fetch_academics_de()
-    kowi_raw        = fetch_kowi()
-    euraxess_raw    = fetch_euraxess()
-    wwr_raw         = fetch_weworkremotely()
-    remotive_raw    = fetch_remotive()
-    berlin_raw      = fetch_berlinstartupjobs()
-    jobriver_raw    = fetch_jobriver()
-    daheim_raw      = fetch_jobs_daheim()
-    englishjobs_raw = fetch_englishjobs()
-    germantech_raw  = fetch_germantechjobs()
+    print("=== Fetching ===")
+    sources = [
+        ("arbeitnow", fetch_arbeitnow),
+        ("bundesagentur", fetch_bundesagentur),
+        ("academics_de", fetch_academics_de),
+        ("kowi", fetch_kowi),
+        ("euraxess", fetch_euraxess),
+        ("weworkremotely", fetch_weworkremotely),
+        ("remotive", fetch_remotive),
+        ("berlinstartupjobs", fetch_berlinstartupjobs),
+        ("jobriver", fetch_jobriver),
+        ("jobs_daheim", fetch_jobs_daheim),
+        ("englishjobs", fetch_englishjobs),
+        ("germantechjobs", fetch_germantechjobs),
+        ("jobvector", fetch_jobvector),
+        ("jobware", fetch_jobware),
+        ("research_in_germany", fetch_research_in_germany),
+        ("wila_bonn", fetch_wila_bonn),
+        ("jooble", fetch_jooble),
+        ("adzuna", fetch_adzuna),
+        ("google_jobs", fetch_google_jobs),
+    ]
 
-    arbeitnow_dach = [j for j in arbeitnow_raw if is_dach(j["location"])]
-
-    all_jobs = (
-        arbeitnow_dach + ba_raw + academics_raw
-        + kowi_raw + euraxess_raw + wwr_raw + remotive_raw
-        + berlin_raw + jobriver_raw + daheim_raw
-        + englishjobs_raw + germantech_raw
-    )
+    all_jobs = []
+    for name, fn in sources:
+        try:
+            batch = fn()
+            if name == "arbeitnow":
+                batch = [j for j in batch if is_dach(j["location"])]
+            all_jobs.extend(batch)
+        except Exception as e:
+            print(f"  {name} fatal: {e}")
 
     all_jobs = [j for j in all_jobs if not is_switzerland(j.get("location", ""))]
     print(f"Total usable: {len(all_jobs)}\n")
@@ -945,49 +988,46 @@ def main():
 
     matches = []
     for i, job in enumerate(candidates, 1):
-        print(f"[{i}/{len(candidates)}] {job['title']} — {job['location']}")
+        entry_tag = "🌱" if job.get("is_entry") else "  "
+        print(f"[{i}/{len(candidates)}] {entry_tag} {job['title']} — "
+              f"{job['location']} (anchor: {job.get('anchor','-')})")
         pct = score_groq(job)
         if pct is None:
             pct = score_gemini(job)
         if pct is None:
-            time.sleep(12)
-            continue
+            time.sleep(12); continue
         print(f"  {pct}%")
         if pct >= MIN_MATCH:
             matches.append({**job, "pct": pct})
         time.sleep(12)
 
-    matches.sort(key=lambda x: x["pct"], reverse=True)
+    matches.sort(key=lambda x: (x.get("is_entry", False), x["pct"]), reverse=True)
     print(f"\nMatches: {len(matches)}")
 
     if not matches:
-        send_tg(f"🎯 Job Radar: 0 matches above {MIN_MATCH}% ({len(candidates)} scored).")
+        send_tg(f"🎯 Job Radar: 0 matches above {MIN_MATCH}% "
+                f"({len(candidates)} scored)")
         return
 
     source_label = {
-        "arbeitnow": "arbeitnow",
-        "bundesagentur": "BA",
-        "academics_de": "academics.de",
-        "kowi": "KoWi",
-        "euraxess": "EURAXESS",
-        "weworkremotely": "WWR",
-        "remotive": "Remotive",
-        "berlinstartupjobs": "BerlinStartupJobs",
-        "jobriver": "JOBRIVER",
-        "jobs_daheim": "Jobs-Daheim",
-        "englishjobs": "EnglishJobs.de",
-        "germantechjobs": "GermanTechJobs",
+        "arbeitnow": "arbeitnow", "bundesagentur": "BA",
+        "academics_de": "academics.de", "kowi": "KoWi",
+        "euraxess": "EURAXESS", "weworkremotely": "WWR",
+        "remotive": "Remotive", "berlinstartupjobs": "BerlinStartupJobs",
+        "jobriver": "JOBRIVER", "jobs_daheim": "Jobs-Daheim",
+        "englishjobs": "EnglishJobs", "germantechjobs": "GermanTechJobs",
+        "jobvector": "Jobvector", "jobware": "Jobware",
+        "research_in_germany": "Research-in-Germany", "wila_bonn": "Wila Bonn",
+        "jooble": "Jooble", "adzuna": "Adzuna", "google_jobs": "Google Jobs",
     }
 
     lines = [f"<b>🎯 Job Radar — {len(matches)} matches</b>"]
     for m in matches:
-        line = (
-            f"<b>{m['pct']}%</b> — <a href=\"{m['url']}\">{m['title']}</a>\n"
-            f"{m['company']} · {m['location']} · {source_label.get(m['source'], m['source'])}"
-        )
-        fit = thesis_fit_line(m)
-        if fit:
-            line += f"\n{fit}"
+        badge = "🌱 " if m.get("is_entry") else ""
+        line = (f"<b>{m['pct']}%</b> {badge}— <a href=\"{m['url']}\">{m['title']}</a>\n"
+                f"{m['company']} · {m['location']} · "
+                f"{source_label.get(m['source'], m['source'])}\n"
+                f"🎯 Anchor: <i>{m.get('anchor','-')}</i>")
         lines.append(line)
     send_tg("\n\n".join(lines))
 
