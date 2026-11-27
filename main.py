@@ -11,12 +11,8 @@ TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
-JOOBLE_KEY = os.environ.get("JOOBLE_KEY", "")
-ADZUNA_APP_ID = os.environ.get("ADZUNA_APP_ID", "")
-ADZUNA_APP_KEY = os.environ.get("ADZUNA_APP_KEY", "")
-SERPAPI_KEY = os.environ.get("SERPAPI_KEY", "")
 
-# ---------- Germany + Austria only ----------
+# ---------- DACH Location Filter ----------
 DACH_CITIES = [
     "germany", "deutschland", "berlin", "münchen", "munich", "hamburg",
     "frankfurt", "köln", "cologne", "düsseldorf", "dusseldorf", "stuttgart",
@@ -35,14 +31,7 @@ def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
 
-SWITZERLAND_RE = re.compile(
-    r"\b(switzerland|schweiz|zürich|zurich|basel|bern|genf|geneva|"
-    r"luzern|lausanne|winterthur|st\.?\s*gallen|ch-)\b", re.IGNORECASE)
-
-def is_switzerland(location):
-    return bool(SWITZERLAND_RE.search(location or ""))
-
-# ---------- Hard reject titles ----------
+# ---------- Title Hard Reject (Fast Filter) ----------
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -94,7 +83,7 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"logistikplaner|kaufm\w*"
     r")\b", re.IGNORECASE)
 
-# ---------- Experience hard reject (bulletproof) ----------
+# ---------- Experience Hard Reject ----------
 EXPERIENCE_HARD_RE = re.compile(
     r"("
     r"(?:mindestens|mind\.?|min\.?|minimum|wenigstens)\s*"
@@ -123,15 +112,7 @@ EXPERIENCE_HARD_RE = re.compile(
     r"langjährige\s+erfahrung"
     r")", re.IGNORECASE)
 
-EXPERIENCE_SOFT_RE = re.compile(
-    r"("
-    r"(?:berufs)?erfahrung\s+(?:von\s+)?vorteil|"
-    r"erfahrung\s+(?:von\s+)?vorteil|"
-    r"w(?:ü|ue|u)nschenswert|"
-    r"idealerweise\s+.{0,40}erfahrung|"
-    r"von\s+vorteil.{0,60}erfahrung"
-    r")", re.IGNORECASE)
-
+# ---------- Body Hard Reject ----------
 HARD_REJECT_BODY_RE = re.compile(
     r"("
     r"\bc1\b|\bc2\b|muttersprache|"
@@ -144,9 +125,7 @@ HARD_REJECT_BODY_RE = re.compile(
     r"hochspannung|freileitung|schaltanlage"
     r")", re.IGNORECASE)
 
-VERHANDLUNGSSICHER_RE = re.compile(r"\bverhandlungssicher\w*\b", re.IGNORECASE)
-
-# ---------- ANCHOR terms (thesis + cobot) ----------
+# ---------- Technical Anchors (BAM Thesis / Cobot) ----------
 ANCHOR_TERMS = [
     "pyironflow", "electrochemical", "electrochemistry", "elektrochemie",
     "elektrochemisch", "potentiostat", "palmsens", "emstat",
@@ -219,12 +198,6 @@ ENTRY_TITLE_TERMS = ["junior", "trainee", "absolvent", "einsteiger",
                      "entry level", "entry-level", "young professional",
                      "quereinsteiger"]
 
-MID_LEVEL_PENALTY_RE = re.compile(
-    r"(erfahrene[rn]?\s+(?:persönlichkeit|fachkraft|ingenieur|entwickler)|"
-    r"mehrere\s+jahre|fundierte\s+kenntnisse|"
-    r"(?:[3-9]|\d{2,})\s*[-–]\s*\d+\s*jahre|(?:[3-9]|\d{2,})\+?\s*jahre)",
-    re.IGNORECASE)
-
 MAX_SCORE = 15
 MIN_MATCH = 55
 ENTRY_RESERVE_NON_ENTRY = 4
@@ -249,22 +222,9 @@ Professional Experience: 6 years Federal Bank — requirements analysis, project
 Languages: English C1, German B2. Work permit Section 18b.
 """
 
-ENGLISH_PRIMARY_RE = re.compile(
-    r"\b(english.?speaking|english.?working.?language|"
-    r"working.?language.?english|project.?language.?english|"
-    r"fluent.?english|business.?english|english.?required)\b", re.IGNORECASE)
-
-GERMAN_ONLY_RE = re.compile(
-    r"\b(deutschkenntnisse|german.?language|deutsch.?erforderlich|"
-    r"sehr.?gute.?deutsch|gute.?deutsch)\b", re.IGNORECASE)
-
 groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_KEY)
 
-
-# ============================================================
-# FETCHERS — FREE SOURCES
-# ============================================================
 
 def fetch_arbeitnow():
     try:
@@ -331,6 +291,15 @@ def fetch_bundesagentur():
     return jobs
 
 
+def fetch_jobware():
+    return _html_job_fetch(
+        "https://www.jobware.de/jobs/?q=",
+        ["Messtechnik", "Laborautomation", "Prüfmittel", "Testingenieur",
+         "Automatisierung", "Kalibrierung", "Measurement Engineer",
+         "Test Engineer", "Laboratory Automation"],
+        r'href="(/job/[^"#?]+|/stellenangebote/[^"#?]+)"[^>]*>(.*?)</a>', "jobware")
+
+
 def _html_job_fetch(base_url, queries, link_pattern, source_name,
                     default_location="Germany"):
     jobs, seen = [], set()
@@ -362,369 +331,11 @@ def _html_job_fetch(base_url, queries, link_pattern, source_name,
     return jobs
 
 
-def fetch_academics_de():
-    return _html_job_fetch(
-        "https://www.academics.de/jobs?q=",
-        ["Lab Automation", "Laboratory Automation", "FAIR data",
-         "research data management", "metadata", "PyironFlow",
-         "electrochemical", "workflow automation", "scientific software",
-         "measurement automation", "laboratory informatics"],
-        r'href="(/jobs/[^"#?]+-?\d{4,})"[^>]*>(.*?)</a>', "academics_de")
-
-
-def fetch_jobriver():
-    return _html_job_fetch(
-        "https://jobriver.de/jobs?q=",
-        ["laborautomation", "messtechnik", "prüfmittel", "kalibrierung",
-         "testingenieur", "automatisierung", "systemintegration"],
-        r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>', "jobriver")
-
-
-def fetch_englishjobs():
-    jobs, seen = [], set()
-    try:
-        r = requests.get("https://englishjobs.de/", timeout=20,
-                         headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 200:
-            for m in re.finditer(r'href="(/job/[^"#?]+)"[^>]*>(.*?)</a>',
-                                 r.text, re.DOTALL):
-                path, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 5 or path in seen:
-                    continue
-                seen.add(path)
-                jobs.append({"title": title, "company": "EnglishJobs.de",
-                             "location": "Germany", "description": "",
-                             "url": f"https://englishjobs.de{path}",
-                             "source": "englishjobs"})
-        print(f"  EnglishJobs: {len(jobs)}")
-    except Exception as e:
-        print(f"  EnglishJobs exception: {e}")
-    return jobs
-
-
-def fetch_germantechjobs():
-    jobs, seen = [], set()
-    try:
-        r = requests.get("https://germantechjobs.de/en", timeout=20,
-                         headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 200:
-            for m in re.finditer(r'href="(/en/jobs/[^"#?]+)"[^>]*>(.*?)</a>',
-                                 r.text, re.DOTALL):
-                path, title = m.group(1), re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 5 or path in seen:
-                    continue
-                seen.add(path)
-                jobs.append({"title": title, "company": "GermanTechJobs",
-                             "location": "Germany", "description": "",
-                             "url": f"https://germantechjobs.de{path}",
-                             "source": "germantechjobs"})
-        print(f"  GermanTechJobs: {len(jobs)}")
-    except Exception as e:
-        print(f"  GermanTechJobs exception: {e}")
-    return jobs
-
-
-def fetch_jobs_daheim():
-    jobs = []
-    try:
-        r = requests.get("https://jobs-daheim.de/", timeout=20,
-                         headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 200:
-            for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
-                                 r.text, re.DOTALL):
-                href = m.group(1)
-                inner = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if "/job/" in href and 5 < len(inner) < 140:
-                    jobs.append({"title": inner, "company": "Jobs-Daheim",
-                                 "location": "DACH (remote)", "description": "",
-                                 "url": href if href.startswith("http") else "https://jobs-daheim.de" + href,
-                                 "source": "jobs_daheim"})
-        print(f"  Jobs-Daheim: {len(jobs)}")
-    except Exception as e:
-        print(f"  Jobs-Daheim exception: {e}")
-    return jobs
-
-
-def fetch_kowi():
-    jobs = []
-    try:
-        r = requests.get("https://www.kowi.de/desktopdefault.aspx/tabid-111/",
-                         timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-        for m in re.finditer(r'\[([^\]]{10,180})\]\(([^)]+)\)', r.text):
-            title, url = m.group(1).strip(), m.group(2).strip()
-            if not url.startswith("http"):
-                url = "https://www.kowi.de" + url
-            tl = title.lower()
-            if any(k in tl for k in ["helmholtz", "leibniz", "fraunhofer",
-                                     "postdoc", "phd", "research", "scientist",
-                                     "engineer", "data", "python", "doktorand",
-                                     "wissenschaft", "automation", "laboratory",
-                                     "measurement", "electrochemical", "workflow"]):
-                jobs.append({"title": title, "company": "Research institute (KoWi)",
-                             "location": "Germany / Austria", "description": "",
-                             "url": url, "source": "kowi"})
-        print(f"  KoWi: {len(jobs)}")
-    except Exception as e:
-        print(f"  KoWi exception: {e}")
-    return jobs
-
-
-def _parse_rss(url, source_name, default_location="Germany / Remote", title_filter=None):
-    jobs = []
-    try:
-        r = requests.get(url, timeout=20, headers={"User-Agent": "Mozilla/5.0"})
-        r.raise_for_status()
-        root = ET.fromstring(r.content)
-        for item in root.findall(".//item"):
-            title = item.findtext("title", "").strip()
-            link = item.findtext("link", "").strip()
-            desc = item.findtext("description", "").strip()
-            if not title or not link:
-                continue
-            combined = (title + " " + desc).lower()
-            if title_filter and not any(k in combined for k in title_filter):
-                continue
-            jobs.append({"title": title, "company": source_name,
-                         "location": default_location, "description": desc,
-                         "url": link, "source": source_name})
-        print(f"  {source_name}: {len(jobs)}")
-    except Exception as e:
-        print(f"  {source_name} exception: {e}")
-    return jobs
-
-
-def fetch_euraxess():
-    return _parse_rss("https://www.euraxess.ba/sr/services/jobs/rss", "euraxess",
-                      "Germany / Austria / EU",
-                      ["germany", "austria", "deutschland", "österreich",
-                       "data", "engineer", "research", "automation",
-                       "laboratory", "measurement", "electrochemical"])
-
-
-def fetch_weworkremotely():
-    return _parse_rss(
-        "https://weworkremotely.com/categories/remote-programming-jobs.rss",
-        "weworkremotely", "Remote",
-        ["python", "engineer", "integration", "test", "automation",
-         "data", "api", "lab", "workflow", "measurement"])
-
-
-def fetch_remotive():
-    return _parse_rss("https://remotive.com/remote-jobs/feed/engineering",
-                      "remotive", "Remote",
-                      ["python", "engineer", "integration", "test", "automation",
-                       "data", "api", "lab", "workflow"])
-
-
-def fetch_berlinstartupjobs():
-    return _parse_rss("https://berlinstartupjobs.com/feed/",
-                      "berlinstartupjobs", "Berlin, Germany",
-                      ["python", "engineer", "integration", "test", "automation",
-                       "data", "api", "technical", "lab", "measurement"])
-
-
-def fetch_jobvector():
-    return _html_job_fetch(
-        "https://www.jobvector.de/jobs/?q=",
-        ["Messtechnik", "Automatisierung", "Laborautomation", "Testingenieur",
-         "Prüfmittel", "Kalibrierung", "Python", "Laboratory Automation",
-         "Measurement", "Test Engineer", "Electrochemical", "Lab Automation"],
-        r'href="(/jobs/[^"#?]+-\d+/?|/job/[^"#?]+)"[^>]*>(.*?)</a>', "jobvector")
-
-
-def fetch_jobware():
-    return _html_job_fetch(
-        "https://www.jobware.de/jobs/?q=",
-        ["Messtechnik", "Laborautomation", "Prüfmittel", "Testingenieur",
-         "Automatisierung", "Kalibrierung", "Measurement Engineer",
-         "Test Engineer", "Laboratory Automation"],
-        r'href="(/job/[^"#?]+|/stellenangebote/[^"#?]+)"[^>]*>(.*?)</a>', "jobware")
-
-
-def fetch_research_in_germany():
-    jobs, seen = [], set()
-    try:
-        r = requests.get("https://www.research-in-germany.org/en/jobs.html",
-                         timeout=25, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 200:
-            for m in re.finditer(r'href="([^"]*jobs?/[^"]+)"[^>]*>(.*?)</a>',
-                                 r.text, re.DOTALL):
-                href = m.group(1)
-                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 10 or len(title) > 160 or href in seen:
-                    continue
-                seen.add(href)
-                if any(k in title.lower() for k in ["data", "engineer", "research",
-                                                    "scientist", "automation",
-                                                    "measurement", "postdoc", "phd"]):
-                    url = href if href.startswith("http") else "https://www.research-in-germany.org" + href
-                    jobs.append({"title": title, "company": "Research in Germany",
-                                 "location": "Germany", "description": "",
-                                 "url": url, "source": "research_in_germany"})
-        print(f"  Research-in-Germany: {len(jobs)}")
-    except Exception as e:
-        print(f"  Research-in-Germany exception: {e}")
-    return jobs
-
-
-def fetch_wila_bonn():
-    jobs, seen = [], set()
-    try:
-        r = requests.get("https://www.wila-bonn.de/stellenangebote/",
-                         timeout=25, headers={"User-Agent": "Mozilla/5.0"})
-        if r.status_code == 200:
-            for m in re.finditer(r'href="(/stellenangebote?/[^"#?]+)"[^>]*>(.*?)</a>',
-                                 r.text, re.DOTALL):
-                path = m.group(1)
-                title = re.sub(r"<[^>]+>", "", m.group(2)).strip()
-                if not title or len(title) < 10 or path in seen:
-                    continue
-                seen.add(path)
-                if any(k in title.lower() for k in ["engineer", "scientist",
-                                                    "research", "data", "technical",
-                                                    "automation", "measurement"]):
-                    jobs.append({"title": title, "company": "Wila Bonn",
-                                 "location": "Germany", "description": "",
-                                 "url": f"https://www.wila-bonn.de{path}",
-                                 "source": "wila_bonn"})
-        print(f"  Wila Bonn: {len(jobs)}")
-    except Exception as e:
-        print(f"  Wila Bonn exception: {e}")
-    return jobs
-
-
-# ---------- NEW: JOOBLE (free API, aggregates Google Jobs + many boards) ----------
-
-def fetch_jooble():
-    if not JOOBLE_KEY:
-        print("  Jooble: skipped (no JOOBLE_KEY)")
-        return []
-    jobs, seen = [], set()
-    queries = ["Messtechnik", "Laborautomation", "Testingenieur", "Prüfmittel",
-               "Kalibrierung", "Automatisierung", "Systemintegration",
-               "Measurement Engineer", "Lab Automation", "Test Engineer",
-               "Calibration Engineer", "Python Engineer"]
-    for q in queries:
-        try:
-            r = requests.post(f"https://jooble.org/api/{JOOBLE_KEY}",
-                              json={"keywords": q, "location": "Germany"},
-                              timeout=25)
-            if r.status_code != 200:
-                print(f"  Jooble '{q}': HTTP {r.status_code}")
-                continue
-            data = r.json().get("jobs", [])
-            print(f"  Jooble '{q}': {len(data)}")
-            for j in data:
-                key = j.get("link", "") or j.get("title", "")
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                jobs.append({
-                    "title": j.get("title", ""),
-                    "company": j.get("company", ""),
-                    "location": j.get("location", "Germany"),
-                    "description": j.get("snippet", ""),
-                    "url": j.get("link", ""),
-                    "source": "jooble",
-                })
-        except Exception as e:
-            print(f"  Jooble '{q}' exception: {e}")
-    return jobs
-
-
-# ---------- NEW: ADZUNA (free tier, aggregates 1,000+ sources) ----------
-
-def fetch_adzuna():
-    if not (ADZUNA_APP_ID and ADZUNA_APP_KEY):
-        print("  Adzuna: skipped (no ADZUNA keys)")
-        return []
-    jobs, seen = [], set()
-    queries = ["Messtechnik", "Laborautomation", "Testingenieur", "Prüfmittel",
-               "Kalibrierung", "Automatisierung", "Systemintegration",
-               "Measurement Engineer", "Lab Automation", "Test Engineer",
-               "Calibration Engineer", "Python Engineer", "FAIR data"]
-    for q in queries:
-        try:
-            url = (f"https://api.adzuna.com/v1/api/jobs/de/search/1"
-                   f"?app_id={ADZUNA_APP_ID}&app_key={ADZUNA_APP_KEY}"
-                   f"&results_per_page=30&what={quote(q)}")
-            r = requests.get(url, timeout=25)
-            if r.status_code != 200:
-                print(f"  Adzuna '{q}': HTTP {r.status_code}")
-                continue
-            data = r.json().get("results", [])
-            print(f"  Adzuna '{q}': {len(data)}")
-            for j in data:
-                key = j.get("redirect_url", "") or j.get("title", "")
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                loc = j.get("location", {}).get("display_name", "Germany")
-                jobs.append({
-                    "title": j.get("title", ""),
-                    "company": j.get("company", {}).get("display_name", ""),
-                    "location": loc,
-                    "description": j.get("description", ""),
-                    "url": j.get("redirect_url", ""),
-                    "source": "adzuna",
-                })
-        except Exception as e:
-            print(f"  Adzuna '{q}' exception: {e}")
-    return jobs
-
-
-# ---------- NEW: SERPAPI GOOGLE JOBS (optional, 100 free/month) ----------
-
-def fetch_google_jobs():
-    if not SERPAPI_KEY:
-        print("  Google Jobs: skipped (no SERPAPI_KEY)")
-        return []
-    jobs, seen = [], set()
-    queries = ["Messtechnik Ingenieur", "Laborautomation", "Testingenieur",
-               "Prüfmittelentwickler", "Kalibrierung", "Automatisierung",
-               "Measurement Engineer", "Lab Automation Engineer",
-               "Test Engineer", "Berufseinsteiger Messtechnik"]
-    for q in queries:
-        try:
-            r = requests.get("https://serpapi.com/search.json",
-                             params={"engine": "google_jobs", "q": q,
-                                     "location": "Germany", "hl": "de",
-                                     "gl": "de", "api_key": SERPAPI_KEY},
-                             timeout=30)
-            if r.status_code != 200:
-                print(f"  Google Jobs '{q}': HTTP {r.status_code}")
-                continue
-            data = r.json().get("jobs_results", [])
-            print(f"  Google Jobs '{q}': {len(data)}")
-            for j in data:
-                key = (j.get("title", ""), j.get("company_name", ""))
-                if not key[0] or key in seen:
-                    continue
-                seen.add(key)
-                apply_opts = j.get("apply_options", [])
-                url = apply_opts[0].get("link", "") if apply_opts else ""
-                jobs.append({
-                    "title": j.get("title", ""),
-                    "company": j.get("company_name", ""),
-                    "location": j.get("location", "Germany"),
-                    "description": j.get("description", ""),
-                    "url": url,
-                    "source": "google_jobs",
-                })
-        except Exception as e:
-            print(f"  Google Jobs '{q}' exception: {e}")
-    return jobs
-
-
-# ============================================================
-# SCORING
-# ============================================================
-
 def build_prompt(job):
     desc = job['description'][:2500] if job['description'].strip() else \
         "(not available — score based on title, company, location only)"
-    return f"""Score this job 0-100 for the candidate. Return ONLY the integer.
+    return f"""You are a BRUTAL, STRICT technical recruiter. Do not be generous. Do not assume.
+Read the FULL description. If the work is actually sales, support, or admin, score 0 regardless of title.
 
 CANDIDATE:
 {CV_SUMMARY}
@@ -746,16 +357,12 @@ STRONG FIT (score 80-95):
 - Research Data Engineer (FAIR data, metadata, Python)
 - Requirements Engineer
 
-ENTRY-LEVEL BOOST (+10):
-- Berufseinsteiger, Trainee, Hochschulabsolvent, Graduate, Junior
-- "keine Erfahrung erforderlich", "Bereitschaft zur Einarbeitung"
-- "Erfahrung von Vorteil" (not required)
-
 HARD ZERO (score 0, never above):
+- If the description mentions >50% of the time: sales, customer support, answering calls, scheduling, admin work.
 - KYC / AML / Compliance / Bankkaufmann / Financial Crime / Sanctions
 - Data Steward / Data Governance / Master Data / SAP Stammdaten
 - IT-Systemintegrator / Fachinformatiker / No-Code / Low-Code / SaaS / CRM
-- Sales / Account Manager / Account Executive
+- Sales / Account Manager / Account Executive / Vertrieb
 - Full Stack / Backend / Frontend / DevOps / Cloud Engineer
 - Senior / Lead / Head of / Director / Principal
 - Audit / Risk Management / Regulatory Affairs
@@ -768,8 +375,6 @@ LOW FIT (score 5-20):
 - Trade roles (Schweißer, Elektriker, Monteur, Zerspaner, CNC)
 
 RULES:
-- Software developer roles (Java, C#, React) = 15 max.
-- Any Senior/Lead/Head/Director title = 0-15.
 - Explicit C1 German required = cap at 40.
 - "Verhandlungssichere Deutschkenntnisse" = cap at 55.
 - B2 German required, no English-primary = cap at 65.
@@ -777,10 +382,9 @@ RULES:
 - "Mehrjährige Berufserfahrung" or "mindestens 3 Jahre" = cap at 25.
 - "Berufserfahrung erforderlich" / "nachweisbare Erfahrung" = cap at 30.
 - If the description is empty, cap at 65.
-- If the title contains Compliance / KYC / AML / Data Steward / Master Data /
-  Stammdaten / Governance / Audit / Risk = return 0, no exceptions.
 
-Answer:"""
+Answer with ONLY the integer. No explanation.
+"""
 
 
 def parse_score(text):
@@ -800,7 +404,7 @@ def score_groq(job):
     for attempt in range(2):
         try:
             r = groq_client.chat.completions.create(
-                model="openai/gpt-oss-20b",
+                model="llama-3.3-70b-versatile",  # UPGRADED MODEL
                 messages=[{"role": "user", "content": build_prompt(job)}],
                 temperature=0.0, max_completion_tokens=2048,
                 reasoning_effort="low")
@@ -835,10 +439,6 @@ def score_gemini(job):
                 break
     return None
 
-
-# ============================================================
-# FILTER — ANCHOR-GATED + EXPERIENCE-GATED
-# ============================================================
 
 def find_anchor(tl, bl):
     for term in ANCHOR_TERMS:
@@ -880,12 +480,6 @@ def rank_and_filter(jobs):
 
         rank = 10 * anchor_in_title + 2 * domain_hits + 1 * weak_hits
 
-        if ENGLISH_PRIMARY_RE.search(bl):
-            rank += 5
-        if GERMAN_ONLY_RE.search(bl) and not ENGLISH_PRIMARY_RE.search(bl):
-            rank -= 3
-        if VERHANDLUNGSSICHER_RE.search(bl):
-            rank -= 10
         if job.get("source") in ("academics_de", "kowi", "euraxess",
                                  "jobriver", "jobs_daheim", "englishjobs",
                                  "germantechjobs", "jobvector", "jobware",
@@ -899,10 +493,6 @@ def rank_and_filter(jobs):
             rank += min(entry_hits * 5, 40)
         if any(k in tl for k in ENTRY_TITLE_TERMS):
             rank += 25
-        if EXPERIENCE_SOFT_RE.search(bl) and not is_entry:
-            rank -= 8
-        if MID_LEVEL_PENALTY_RE.search(bl):
-            rank -= 8
 
         job["anchor"] = anchor
         job["is_entry"] = is_entry
@@ -942,32 +532,12 @@ def send_tg(text):
         print(f"Telegram error: {e}")
 
 
-# ============================================================
-# MAIN
-# ============================================================
-
 def main():
     print("=== Fetching ===")
     sources = [
         ("arbeitnow", fetch_arbeitnow),
         ("bundesagentur", fetch_bundesagentur),
-        ("academics_de", fetch_academics_de),
-        ("kowi", fetch_kowi),
-        ("euraxess", fetch_euraxess),
-        ("weworkremotely", fetch_weworkremotely),
-        ("remotive", fetch_remotive),
-        ("berlinstartupjobs", fetch_berlinstartupjobs),
-        ("jobriver", fetch_jobriver),
-        ("jobs_daheim", fetch_jobs_daheim),
-        ("englishjobs", fetch_englishjobs),
-        ("germantechjobs", fetch_germantechjobs),
-        ("jobvector", fetch_jobvector),
         ("jobware", fetch_jobware),
-        ("research_in_germany", fetch_research_in_germany),
-        ("wila_bonn", fetch_wila_bonn),
-        ("jooble", fetch_jooble),
-        ("adzuna", fetch_adzuna),
-        ("google_jobs", fetch_google_jobs),
     ]
 
     all_jobs = []
@@ -980,7 +550,6 @@ def main():
         except Exception as e:
             print(f"  {name} fatal: {e}")
 
-    all_jobs = [j for j in all_jobs if not is_switzerland(j.get("location", ""))]
     print(f"Total usable: {len(all_jobs)}\n")
 
     candidates = rank_and_filter(all_jobs)
@@ -1011,14 +580,7 @@ def main():
 
     source_label = {
         "arbeitnow": "arbeitnow", "bundesagentur": "BA",
-        "academics_de": "academics.de", "kowi": "KoWi",
-        "euraxess": "EURAXESS", "weworkremotely": "WWR",
-        "remotive": "Remotive", "berlinstartupjobs": "BerlinStartupJobs",
-        "jobriver": "JOBRIVER", "jobs_daheim": "Jobs-Daheim",
-        "englishjobs": "EnglishJobs", "germantechjobs": "GermanTechJobs",
-        "jobvector": "Jobvector", "jobware": "Jobware",
-        "research_in_germany": "Research-in-Germany", "wila_bonn": "Wila Bonn",
-        "jooble": "Jooble", "adzuna": "Adzuna", "google_jobs": "Google Jobs",
+        "jobware": "Jobware",
     }
 
     lines = [f"<b>🎯 Job Radar — {len(matches)} matches</b>"]
