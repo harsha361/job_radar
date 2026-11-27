@@ -12,7 +12,6 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_KEY = os.environ["GEMINI_KEY"]
 GROQ_KEY = os.environ.get("GROQ_KEY", "")
 
-# ---------- DACH Location Filter ----------
 DACH_CITIES = [
     "germany", "deutschland", "berlin", "münchen", "munich", "hamburg",
     "frankfurt", "köln", "cologne", "düsseldorf", "dusseldorf", "stuttgart",
@@ -31,7 +30,6 @@ def is_dach(location):
     loc = (location or "").lower()
     return any(c in loc for c in DACH_CITIES)
 
-# ---------- Title Hard Reject (Fast Filter) ----------
 HARD_REJECT_TITLE_RE = re.compile(
     r"\b("
     r"werkstudent|working.?student|praktikant|praktikum|ausbildung|"
@@ -83,7 +81,6 @@ HARD_REJECT_TITLE_RE = re.compile(
     r"logistikplaner|kaufm\w*"
     r")\b", re.IGNORECASE)
 
-# ---------- Experience Hard Reject ----------
 EXPERIENCE_HARD_RE = re.compile(
     r"("
     r"(?:mindestens|mind\.?|min\.?|minimum|wenigstens)\s*"
@@ -112,7 +109,6 @@ EXPERIENCE_HARD_RE = re.compile(
     r"langjährige\s+erfahrung"
     r")", re.IGNORECASE)
 
-# ---------- Body Hard Reject ----------
 HARD_REJECT_BODY_RE = re.compile(
     r"("
     r"\bc1\b|\bc2\b|muttersprache|"
@@ -125,7 +121,6 @@ HARD_REJECT_BODY_RE = re.compile(
     r"hochspannung|freileitung|schaltanlage"
     r")", re.IGNORECASE)
 
-# ---------- Technical Anchors (BAM Thesis / Cobot) ----------
 ANCHOR_TERMS = [
     "pyironflow", "electrochemical", "electrochemistry", "elektrochemie",
     "elektrochemisch", "potentiostat", "palmsens", "emstat",
@@ -225,7 +220,6 @@ Languages: English C1, German B2. Work permit Section 18b.
 groq_client = Groq(api_key=GROQ_KEY) if GROQ_KEY else None
 gemini_client = genai.Client(api_key=GEMINI_KEY)
 
-
 def fetch_arbeitnow():
     try:
         r = requests.get("https://www.arbeitnow.com/api/job-board-api", timeout=30)
@@ -236,7 +230,6 @@ def fetch_arbeitnow():
                 for j in r.json().get("data", [])]
     except Exception as e:
         print(f"Arbeitnow error: {e}"); return []
-
 
 def fetch_bundesagentur():
     headers = {"X-API-Key": "jobboerse-jobsuche"}
@@ -290,16 +283,6 @@ def fetch_bundesagentur():
             print(f"  BA '{q}' exception: {e}")
     return jobs
 
-
-def fetch_jobware():
-    return _html_job_fetch(
-        "https://www.jobware.de/jobs/?q=",
-        ["Messtechnik", "Laborautomation", "Prüfmittel", "Testingenieur",
-         "Automatisierung", "Kalibrierung", "Measurement Engineer",
-         "Test Engineer", "Laboratory Automation"],
-        r'href="(/job/[^"#?]+|/stellenangebote/[^"#?]+)"[^>]*>(.*?)</a>', "jobware")
-
-
 def _html_job_fetch(base_url, queries, link_pattern, source_name,
                     default_location="Germany"):
     jobs, seen = [], set()
@@ -330,6 +313,13 @@ def _html_job_fetch(base_url, queries, link_pattern, source_name,
             print(f"  {source_name} '{q}' exception: {e}")
     return jobs
 
+def fetch_jobware():
+    return _html_job_fetch(
+        "https://www.jobware.de/jobs/?q=",
+        ["Messtechnik", "Laborautomation", "Prüfmittel", "Testingenieur",
+         "Automatisierung", "Kalibrierung", "Measurement Engineer",
+         "Test Engineer", "Laboratory Automation"],
+        r'href="(/job/[^"#?]+|/stellenangebote/[^"#?]+)"[^>]*>(.*?)</a>', "jobware")
 
 def build_prompt(job):
     desc = job['description'][:2500] if job['description'].strip() else \
@@ -386,7 +376,6 @@ RULES:
 Answer with ONLY the integer. No explanation.
 """
 
-
 def parse_score(text):
     if not text:
         return None
@@ -397,32 +386,36 @@ def parse_score(text):
             return i
     return None
 
-
 def score_groq(job):
     if not groq_client:
         return None
-    for attempt in range(2):
-        try:
-            r = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",  # UPGRADED MODEL
-                messages=[{"role": "user", "content": build_prompt(job)}],
-                temperature=0.0, max_completion_tokens=2048,
-                reasoning_effort="low")
-            s = parse_score(r.choices[0].message.content)
-            if s is not None:
-                return s
-        except Exception as e:
-            msg = str(e)
-            if "429" in msg or "rate_limit" in msg:
-                wait = 45
-                mm = re.search(r"try again in ([\d.]+)s", msg)
-                if mm:
-                    wait = min(float(mm.group(1)) + 3, 120)
-                time.sleep(wait)
-            else:
-                time.sleep(5)
+    
+    # We use the models explicitly listed in your screenshot
+    models_to_try = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+    
+    for model in models_to_try:
+        for attempt in range(2):
+            try:
+                r = groq_client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": build_prompt(job)}],
+                    temperature=0.0, max_completion_tokens=2048,
+                    reasoning_effort="low")
+                s = parse_score(r.choices[0].message.content)
+                if s is not None:
+                    return s
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "rate_limit" in msg:
+                    wait = 45
+                    mm = re.search(r"try again in ([\d.]+)s", msg)
+                    if mm:
+                        wait = min(float(mm.group(1)) + 3, 120)
+                    time.sleep(wait)
+                else:
+                    print(f"  Groq {model} error: {e}")
+                    time.sleep(2)
     return None
-
 
 def score_gemini(job):
     for model in ["gemini-2.5-flash", "gemini-2.0-flash"]:
@@ -439,13 +432,11 @@ def score_gemini(job):
                 break
     return None
 
-
 def find_anchor(tl, bl):
     for term in ANCHOR_TERMS:
         if term in tl or term in bl:
             return term
     return None
-
 
 def rank_and_filter(jobs):
     entry_pool, other_pool = [], []
@@ -521,7 +512,6 @@ def rank_and_filter(jobs):
     print(f"Selected: {len(selected)} (entry: {len(take_entry)}, other: {len(take_other)})")
     return [j for _, j in selected]
 
-
 def send_tg(text):
     try:
         requests.post(
@@ -530,7 +520,6 @@ def send_tg(text):
                   "disable_web_page_preview": True}, timeout=15)
     except Exception as e:
         print(f"Telegram error: {e}")
-
 
 def main():
     print("=== Fetching ===")
@@ -592,7 +581,6 @@ def main():
                 f"🎯 Anchor: <i>{m.get('anchor','-')}</i>")
         lines.append(line)
     send_tg("\n\n".join(lines))
-
 
 if __name__ == "__main__":
     main()
